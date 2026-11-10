@@ -1,0 +1,6 @@
+#!/bin/sh
+# Reject AI attribution lines in commit messages. Commits are authored by Dave only.
+if grep -Eiq '^(co-authored-by:.*(claude|anthropic|codex|openai|gemini|antigravity|copilot)|claude-session:)|generated with .*claude' "$1"; then
+  echo "commit-msg: remove the AI co-author / attribution line from the commit message." >&2
+  exit 1
+fi

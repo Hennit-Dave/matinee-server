@@ -46,6 +46,7 @@ Ten-minute rule: if a blocking unknown can be settled by trying it, try it. That
 
 ## 4. Non-negotiables
 
+- **No AI attribution in git.** Never add `Co-Authored-By`, `Claude-Session`, "Generated with" or any other AI credit line to a commit message or PR description. Dave is the only author. The `.githooks/commit-msg` hook rejects them; after a fresh clone run `git config core.hooksPath .githooks`.
 - **Never trust the frontend.** Identity, price, fee, total, seat state, payment state: server only.
 - **Money = integer minor units.** No decimals or floats anywhere. Server returns finished display strings. The app never computes a total.
 - **No secrets** in repo, history or app. Server env vars only. Keep `.env.example` (names, no values) current. Every `EXPO_PUBLIC_*` is listed in the README with a reason it is safe to expose.
