@@ -1,0 +1,16 @@
+# Secrets (any folder depth)
+.env
+.env.*
+!.env.example
+
+# Dependencies and builds
+node_modules/
+dist/
+build/
+.expo/
+*.apk
+*.aab
+
+# OS and editor
+.DS_Store
+*.log
