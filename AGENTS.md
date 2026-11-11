@@ -36,13 +36,24 @@ Do not start building until Dave has answered these. Record each answer as an AD
 4. **Capture the "before"** (baseline, failing test, or recording) in its own commit before any improvement.
 5. **Build.** Conventional Commits only.
 6. **Prove.** Correct row exists in the DB **and is shown in the UI**. Capture the row before any cleanup.
-7. **PR** with description and screenshots. Link the issue. **Dave merges.** Never merge, never force-push.
+7. **PR** with description and screenshots. Link the issue. **Dave squash-merges** (see "Merging and branch cleanup"). Never merge, never force-push.
 8. **Hand back.** Remind Dave to close the chat and write his `LEARNING-LOG.md` paragraph.
 9. **Interview question.** Ask him the relevant one (list in RULES.md section J), one at a time, and give an honest verdict, not a pass.
 
 Say **"tell Dave before the change"** if something will need a new EAS native build. Credits are limited and shared with the rest of the task.
 
 Ten-minute rule: if a blocking unknown can be settled by trying it, try it. That is the research.
+
+## Merging and branch cleanup
+
+1. **Dave merges, and always with "Squash and merge".** Never a plain merge commit, never rebase-merge. The squash commit title is the PR title in Conventional Commits format.
+2. **The agent never merges** and never deletes a branch whose PR is still open.
+3. **When Dave says a PR is merged, confirm it before doing anything else:**
+   - `git fetch --prune origin`
+   - `gh pr view <number> --json state,mergeCommit` shows `MERGED` (if `gh` is unavailable, check that the PR's change is on `origin/main`).
+   - The new commit on `origin/main` has **one parent** and a title ending in `(#<number>)`: `git log -1 --format='%p | %s' origin/main`. Two parents, or a title starting "Merge pull request", means it was not squashed. Tell Dave; do not rewrite history to fix it.
+4. **Then clean up:** `git checkout main && git pull`, delete the local branch with `git branch -D <branch>` (capital D, because a squashed branch does not look merged to git), and delete the remote branch if GitHub has not already: `git push origin --delete <branch>`.
+5. **Report back in one line:** PR number, squash confirmed or not, branches deleted.
 
 ## 4. Non-negotiables
 
