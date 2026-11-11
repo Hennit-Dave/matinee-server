@@ -44,6 +44,13 @@ project has. Sharing a project with Rota would make that budget harder to reason
 - **Revisit when:** Dave actually creates the project and finds out whether the replica provisions; if not,
   the fallback above applies and this ADR gets a dated addendum recording that.
 
+## Addendum — 2026-11-11
+
+Dave created the project. It's on AWS **eu-west-2 (London)**, and Neon provisioned a read replica on the free
+plan — the fallback above did not need to apply. `DATABASE_URL` (primary) and `DATABASE_READ_URL` (replica)
+point at two different hosts, both pooled (`-pooler`). All Matinee services on Railway are placed in EU West
+(Amsterdam) to sit next to this project (ADR 0009's addendum).
+
 ## Evidence
 
 - [Neon: create read replicas in the Free plan](https://neon.com/blog/create-read-replicas-in-the-free-plan)

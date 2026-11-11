@@ -27,6 +27,12 @@ AGENTS.md currently names.
 Option 1: Railway, Hobby plan, $5/month, two always-on services (API + worker). Oracle Cloud Always Free is
 the documented fallback if Railway stops being workable.
 
+## Addendum — 2026-11-11
+
+All Matinee services on Railway (API, worker, and the Redis service recorded in ADR 0008's addendum) run in
+**EU West (Amsterdam)**, next to the Neon project in **London** (ADR 0007's addendum) — kept close for latency
+between the app and both of its data stores.
+
 ## Reason
 
 Northflank is unavailable (its one free project is Rota's). Render's free tier's sleep behaviour directly

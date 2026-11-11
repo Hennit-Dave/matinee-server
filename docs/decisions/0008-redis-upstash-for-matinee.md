@@ -1,6 +1,6 @@
-# 0008 — Redis: Upstash (free plan) replaces Aiven Valkey for Matinee
+# 0008 — Redis: Railway Redis replaces Aiven Valkey for Matinee (Upstash plan superseded)
 
-Date: 2026-11-11 · Status: accepted · Decided by: Dave
+Date: 2026-11-11 · Status: superseded by the 2026-11-11 addendum below — **Upstash was never actually used; Matinee's Redis is a Railway Redis service** · Decided by: Dave
 
 ## Problem
 
@@ -64,3 +64,31 @@ anything depends on it.
   addendum follows once `REDIS_URL` exists and Dave has run it.
 - **Revisit when:** the 2-hour measurement comes back, and again once the rate limiter and real jobs add real
   traffic on top of the idle floor measured here.
+
+## Addendum — 2026-11-11
+
+Upstash is not used. Its free plan allows one database per account, and Dave's existing Upstash database is
+already in use as the login rate limiter for a different deployed app — in AF-SOUTH-1, a region Railway does
+not have. Everything above this line is the originally recorded decision and reasoning; it is kept as history,
+not deleted, but it no longer describes what Matinee runs.
+
+**What Matinee actually uses:** a Redis service on Railway, in a project called "matinee", region EU West
+(Amsterdam) — see ADR 0009's addendum. It has no public access, and stays that way. Local development uses a
+local Redis installed with Homebrew, at `redis://localhost:6379`. CI uses its Redis service container, as
+already planned above. The deployed API and worker reach Railway's Redis over its private URL, from the
+deployment slice onward.
+
+**Why the Reason above still holds:** the risk being avoided — Matinee's load test sharing Rota's live Aiven
+Valkey instance — is exactly as real with Railway Redis as it would have been with Upstash. Only the specific
+provider changed, and only because of Upstash's one-database-per-account limit and its region mismatch with
+Railway, not because of anything wrong with the original reasoning.
+
+**What this removes from slice 0 (PR B, not yet merged):** a Railway Redis service has no monthly command
+budget to measure, so the 2-hour idle-command measurement, the `jobs/scripts/idle-worker.ts` script, and that
+evidence item are all removed from scope. The BullMQ queue and worker files are also removed from slice 0 —
+BullMQ arrives with the first real job, and the number of queues is chosen on design grounds then, not cost.
+`jobs/connection.ts` stays, since `/health` needs a Redis client. Slice 0's live `/health` evidence is against
+Neon and the local Homebrew Redis; the Railway Redis is proven in the deployment slice.
+
+The Mitigation/Measurement/Extrapolation/Fallback subsections above are left exactly as originally written, as
+history of a plan that was superseded before anything was measured.

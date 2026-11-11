@@ -23,7 +23,7 @@ Legend: `[ ]` required · `[S]` stretch · `[SS]` self-study (Dave writes up wha
 
 - [ ] **B1** React Native + Expo, built in Antigravity.
 - [ ] **B2** Backend Dave controls: Node (Express/Hono) or Next API routes, plus PostgreSQL.
-- [ ] **B3** Redis for caching, rate limiting **and locks** (hosted free tier fine; Aiven Valkey is the signed-off substitution — Matinee uses Upstash instead, ADR 0008, with Aiven Valkey as the documented fallback for the queue).
+- [ ] **B3** Redis for caching, rate limiting **and locks** (hosted free tier fine; Aiven Valkey is the signed-off substitution — Matinee uses Redis on Railway instead, ADR 0008).
 - [ ] **B4** Background job queue: BullMQ.
 - [ ] **B5** Payments in **test mode** (Flutterwave/Paystack, or Stripe if account exists). Provider choice recorded as ADR.
 - [ ] **B6** Zod validates **every** request on the server.
