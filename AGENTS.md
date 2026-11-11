@@ -71,7 +71,7 @@ Ten-minute rule: if a blocking unknown can be settled by trying it, try it. That
 
 ## 5. Decided stack
 
-React Native + Expo (Antigravity) · TypeScript strict · Node + Express · PostgreSQL on Neon (primary + read replica + `-pooler` host) · BullMQ on Aiven Valkey (Redis fork, substitution signed off) · Zod · TanStack Query · Zustand (small) · expo-secure-store · Resend from a verified `davebuilds.design` subdomain · Sentry (app + server, shared redaction list) · k6 · Northflank free tier (Oracle Always Free is the documented fallback) · EAS Android `preview` profile · Reanimated · expo-haptics.
+React Native + Expo (Antigravity) · TypeScript strict · Node + Express · PostgreSQL on a dedicated Neon project for Matinee (primary + read replica + `-pooler` host, ADR 0007) · BullMQ on Upstash, free plan (replaces Aiven Valkey for Matinee specifically; ADR 0008 — Aiven Valkey is the documented fallback for the queue if Upstash's command budget doesn't fit) · Zod · TanStack Query · Zustand (small) · expo-secure-store · Resend from a verified `davebuilds.design` subdomain · Sentry (app + server, shared redaction list) · k6 · Railway, Hobby plan (replaces Northflank for Matinee; ADR 0009 — Oracle Always Free remains the documented fallback) · EAS Android `preview` profile · Reanimated · expo-haptics.
 
 ## 6. Layout (split repos, ADR 0004)
 
