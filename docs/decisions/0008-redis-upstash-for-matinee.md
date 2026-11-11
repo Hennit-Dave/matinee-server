@@ -4,17 +4,20 @@ Date: 2026-11-11 · Status: accepted · Decided by: Dave
 
 ## Problem
 
-AGENTS.md §5 names Aiven Valkey, the Redis-fork substitution already signed off and shared with Rota. Matinee's
-Redis usage (seat holds, rate limits, cache, BullMQ) will mostly sit idle between showtimes and load-test runs,
-and Upstash — named directly in the graduation brief as an acceptable option — bills by command count rather
-than by an always-on instance, which may suit a mostly-idle workload better. But BullMQ's own idle polling
-spends commands even with an empty queue, so the budget needs measuring before Matinee commits to it for
-anything load-bearing.
+AGENTS.md §5 names Aiven Valkey, the Redis-fork substitution already signed off and shared with Rota. Reusing
+Rota's existing instance for Matinee too would mean two independently-graded apps sharing one Redis's memory,
+connection limit and outages — and Matinee's own load test (D5.6: 500 VUs against the same 50 seats) is
+designed to stress Redis hard, which would put Rota's own deployed app at risk for the duration of that test.
+Matinee needs its own Redis, and the brief names Upstash directly as an acceptable free-tier option. But
+BullMQ's own idle polling spends commands even with an empty queue, so Upstash's 500K-commands/month budget
+needs measuring before Matinee relies on it for anything load-bearing.
 
 ## Options
 
-1. **Keep Aiven Valkey for Matinee too**, matching Rota exactly — no new research, but an always-on instance
-   billed on uptime/memory rather than activity, possibly the worse fit for a mostly-idle app.
+1. **Share Rota's Aiven Valkey instance**, with a key prefix and a separate database number to keep the two
+   apps' keys apart — no new account, but the apps would still share one instance's memory, connection limit
+   and availability. A memory spike, a connection-limit hit, or an outage on either app's side affects both;
+   Matinee's 500-VU load test would run directly against the same instance serving Rota's real traffic.
 2. **Upstash free plan (500K commands/month) for Matinee**, with a measured idle-budget check before relying
    on it fully, and a documented fallback if the budget doesn't fit.
 
@@ -44,13 +47,17 @@ value.
 
 ## Reason
 
-The brief names Upstash directly as an acceptable free-tier option. A mostly-idle development workload may fit
-command-based billing better than an always-on instance, but that's a real trade-off, not an assumption — hence
-the 2-hour measurement before anything depends on it.
+The brief names Upstash directly as an acceptable free-tier option. The alternative — sharing Rota's Aiven
+Valkey instance — would put Rota's deployed app at risk during Matinee's own 500-VU load test, which is exactly
+the situation ADR 0008 exists to avoid: two independently-graded apps should not share one instance's memory,
+connection limit and outages. A separate Upstash instance for Matinee avoids that risk entirely; the only open
+question is whether its command budget actually fits BullMQ's idle polling, hence the 2-hour measurement before
+anything depends on it.
 
 ## Consequences
 
-- **Easier:** if the budget fits, no instance sits "on" costing nothing to run idle.
+- **Easier:** Matinee's Redis usage can't affect Rota's deployed app, and vice versa — no shared blast radius
+  during the load test or otherwise.
 - **Harder:** command-based billing turns a bug that hot-loops a Redis call into a budget problem, not just a
   bug — worth remembering once the rate limiter and seat-hold code land and actually generate traffic.
 - **Known gap until measured:** the numbers in this ADR are theoretical until the 2-hour run happens. A dated
