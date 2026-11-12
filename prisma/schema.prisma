@@ -1,0 +1,15 @@
+// Matinee schema. One logical database (no sharding, ADR 0005) — a primary and a
+// read replica, both reached through pooled (-pooler) connection strings built in code
+// (src/db/clients.ts), not from a `url` here.
+//
+// No models yet: slice 0 only needs a client that can run a trivial query for /health.
+// Real models (movies, showtimes, seats, bookings) land with Requirement 1 and onward.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
