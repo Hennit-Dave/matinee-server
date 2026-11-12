@@ -1,0 +1,16 @@
+// @ts-check
+import js from '@eslint/js';
+import tseslint from 'typescript-eslint';
+
+export default tseslint.config(
+  { ignores: ['dist/**', 'src/generated/**'] },
+  js.configs.recommended,
+  ...tseslint.configs.recommended,
+  {
+    rules: {
+      // AGENTS.md: no console.log anywhere in server code, including boot/shutdown. The
+      // structured logger (src/http/logger.ts) writes to stdout directly instead.
+      'no-console': 'error',
+    },
+  },
+);

@@ -1,0 +1,4 @@
+# gitleaks allowlist. Nothing is allowlisted yet — this file starts empty on purpose. A later
+# entry (commit:path:rule:line, from `gitleaks git --log-opts="--all"`) is only ever added after
+# it has actually been opened and confirmed to be a test fixture or a documented throwaway value,
+# never pasted in just to make a scan pass (same convention as Rota's .gitleaksignore).
