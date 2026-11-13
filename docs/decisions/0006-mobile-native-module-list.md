@@ -26,6 +26,8 @@ Option 2.
 | `expo-secure-store` | token storage (AGENTS.md non-negotiable) | Yes |
 | `react-native-reanimated` + `react-native-worklets` | screen transitions, seat selection, booking confirmation (D2.5) | Yes |
 | `expo-haptics` | seat-select and payment-confirm haptics (D2.6) | Yes |
+| `react-native-svg` | the `Icon` component: every icon is an SVG path, coloured by a semantic token (added 2026-11-13, Browse slice, matinee-mobile #13) | Yes — in SDK 58's bundled native modules (`15.16.0`); no custom EAS build for development |
+| `expo-blur` | the NavBar's backdrop blur, the glass material on iOS and Android (added 2026-11-13, NavBar slice, matinee-mobile #16) | Yes — in SDK 58's bundled native modules (`~58.0.6`); no custom EAS build for development |
 | `@sentry/react-native` | app error tracking (C8) | **No** — native init needs a custom build |
 | `@stripe/stripe-react-native` | the payment sheet (D4.1) | **No** — native SDK, not in Expo Go's bundled set |
 | QR code display (e.g. `react-native-qrcode-svg`) | ticket screen QR code (D4.6) | Yes — pure JS/SVG; Matinee only *shows* a QR code, never scans one, so no camera module is needed |
@@ -57,3 +59,25 @@ slice.
   not solved by this ADR.
 - **Revisit when:** the payments slice or the observability slice is planned, whichever comes first — that
   slice's plan is where the build actually gets spent.
+
+## Addendum — 2026-11-13
+
+The Browse and NavBar slices installed three Expo-Go-compatible native modules ahead of the first EAS build.
+Checked against `matinee-mobile`'s `main` (which includes #16) and Expo SDK 58's bundled native modules, the
+list of what Expo Go ships:
+
+| Module | Version on mobile `main` | First used by | In SDK 58's bundled set |
+|---|---|---|---|
+| `react-native-reanimated` | `4.7.1` | the `Skeleton` pulse animation (Browse slice, matinee-mobile #13) | Yes, `4.7.1` |
+| `react-native-svg` | `15.16.0` | the `Icon` component (Browse slice, matinee-mobile #13) | Yes, `15.16.0` |
+| `expo-blur` | `~58.0.6` | the NavBar's backdrop blur (NavBar slice, matinee-mobile #16) | Yes, `~58.0.6` |
+
+- **Two rows are new** in the table above: `react-native-svg` and `expo-blur`. **Reanimated was already listed**
+  (for screen transitions, seat selection and booking confirmation), so it gets no second row. What changed for it
+  is that it is now installed, and its first use is the Skeleton pulse rather than a transition. This supersedes the
+  Decision section's remark that Reanimated is "not installed until the slice that first uses them".
+- **No new EAS build was needed for any of the three.** All three run in Expo Go, so development stays
+  Expo-Go-only. Like the rest of the Expo-Go-compatible rows, they are installed by the first EAS Android preview
+  build along with the whole table; they do not by themselves trigger it.
+- Nothing about when the first build is spent changes: still the slice that first wires in Stripe's SDK or
+  Sentry's native init.
