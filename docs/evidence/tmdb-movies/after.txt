@@ -1,0 +1,80 @@
+# After: the TMDB movie endpoints, end to end (branch feat/tmdb-movies-endpoints)
+#
+# REAL in this run: the Express app (validation, error handler, request logger), the movie service,
+#   the Redis cache (a throwaway local Redis on port 6399, flushed first), and the TMDB client with
+#   its retry/backoff and timeouts.
+# FAKED in this run: ONLY the network call to TMDB. It serves the synthetic fixture
+#   (src/movies/fixtures/tmdb-now-playing.json) and can be switched to answer 503. The clock was
+#   advanced 4 h instead of waiting past the 3 h now-playing TTL. No real token, no .env involved.
+# NOT proven here: a call to the real TMDB. See README.md in this folder for the steps Dave runs.
+#
+== 1. now-playing: cold cache, then warm ==
+
+$ curl -i http://localhost:3000/movies/now-playing?page=1    # cold: goes to TMDB
+HTTP 200   X-Cache: MISS   (TMDB calls made for this request: 1)
+{"movies":[{"id":900001,"title":"The Last Projectionist","posterUrl":"https://image.tmdb.org/t/p/w500/fxPosterOne.jpg","year":2026,"overview":"A retired projectionist guards the final reel of a lost film."},{"id":900002,"title":"No Poster, No Date","posterUrl":null,"year":null,"overview":null},{"id":900003,"title":"Long Synopsis","posterUrl":"https://image.tmdb.org/t/p/w500/fxPosterThree.jpg","year":2025,"overview":"…  [746 bytes]
+  redis> TTL movies:v1:now-playing:page:1  ->  97200 s
+
+$ curl -i http://localhost:3000/movies/now-playing?page=1    # warm: served from Redis, TMDB not called
+HTTP 200   X-Cache: HIT   (TMDB calls made for this request: 0)
+{"movies":[{"id":900001,"title":"The Last Projectionist","posterUrl":"https://image.tmdb.org/t/p/w500/fxPosterOne.jpg","year":2026,"overview":"A retired projectionist guards the final reel of a lost film."},{"id":900002,"title":"No Poster, No Date","posterUrl":null,"year":null,"overview":null},{"id":900003,"title":"Long Synopsis","posterUrl":"https://image.tmdb.org/t/p/w500/fxPosterThree.jpg","year":2025,"overview":"…  [746 bytes]
+
+== 2. search: the query is normalised, so these share one cache entry ==
+
+$ curl -i http://localhost:3000/movies/search?q=%20%20Last%20%20PROJECTIONIST%20&page=1    # messy casing/spacing
+HTTP 200   X-Cache: MISS   (TMDB calls made for this request: 1)
+{"movies":[{"id":900001,"title":"The Last Projectionist","posterUrl":"https://image.tmdb.org/t/p/w500/fxPosterOne.jpg","year":2026,"overview":"A retired projectionist guards the final reel of a lost film."}],"page":1,"totalPages":1,"totalResults":1}
+  redis> TTL movies:v1:search:last%20projectionist:page:1  ->  3900 s
+
+$ curl -i http://localhost:3000/movies/search?q=last%20projectionist&page=1    # same query, tidy: a HIT
+HTTP 200   X-Cache: HIT   (TMDB calls made for this request: 0)
+{"movies":[{"id":900001,"title":"The Last Projectionist","posterUrl":"https://image.tmdb.org/t/p/w500/fxPosterOne.jpg","year":2026,"overview":"A retired projectionist guards the final reel of a lost film."}],"page":1,"totalPages":1,"totalResults":1}
+
+== 3. bad input -> the standard error shape ==
+
+$ curl -i http://localhost:3000/movies/now-playing?page=0
+HTTP 400   X-Cache: -   (TMDB calls made for this request: 0)
+{"error":{"code":"validation_failed","message":"The request was not valid.","requestId":"c04aced7-e1d3-4ca8-90de-b71840c86bd1","details":[{"path":"query.page","code":"too_short","min":1}]}}
+
+$ curl -i http://localhost:3000/movies/search?q=%20%20
+HTTP 400   X-Cache: -   (TMDB calls made for this request: 0)
+{"error":{"code":"validation_failed","message":"The request was not valid.","requestId":"2eed0c72-de1d-414a-a62a-9d9f976e5c72","details":[{"path":"query.q","code":"too_short","min":1}]}}
+
+== 4. TMDB goes down; the now-playing entry is past its 3 h fresh TTL (clock +4 h) ==
+
+$ curl -i http://localhost:3000/movies/now-playing?page=1    # TMDB returns 503 x3 (retry with backoff), then the stale copy is served
+HTTP 200   X-Cache: STALE   (TMDB calls made for this request: 3)
+{"movies":[{"id":900001,"title":"The Last Projectionist","posterUrl":"https://image.tmdb.org/t/p/w500/fxPosterOne.jpg","year":2026,"overview":"A retired projectionist guards the final reel of a lost film."},{"id":900002,"title":"No Poster, No Date","posterUrl":null,"year":null,"overview":null},{"id":900003,"title":"Long Synopsis","posterUrl":"https://image.tmdb.org/t/p/w500/fxPosterThree.jpg","year":2025,"overview":"…  [746 bytes]
+
+$ curl -i http://localhost:3000/movies/search?q=never%20searched%20before    # TMDB down AND nothing cached -> clean error, no stack trace
+HTTP 503   X-Cache: -   (TMDB calls made for this request: 3)
+{"error":{"code":"upstream_unavailable","message":"Movie data is temporarily unavailable. Please try again shortly.","requestId":"daab8edd-0fba-4245-a1d9-7e2fc17034ed"}}
+
+== 5. TMDB recovers: the next request refreshes the entry ==
+
+$ curl -i http://localhost:3000/movies/now-playing?page=1
+HTTP 200   X-Cache: MISS   (TMDB calls made for this request: 1)
+{"movies":[{"id":900001,"title":"The Last Projectionist","posterUrl":"https://image.tmdb.org/t/p/w500/fxPosterOne.jpg","year":2026,"overview":"A retired projectionist guards the final reel of a lost film."},{"id":900002,"title":"No Poster, No Date","posterUrl":null,"year":null,"overview":null},{"id":900003,"title":"Long Synopsis","posterUrl":"https://image.tmdb.org/t/p/w500/fxPosterThree.jpg","year":2025,"overview":"…  [746 bytes]
+
+== redis keys (all with a TTL) ==
+  redis> TTL movies:v1:now-playing:page:1  ->  97200 s
+  redis> TTL movies:v1:search:last%20projectionist:page:1  ->  3899 s
+
+== server log lines for the above (JSON, one per line) ==
+{"ts":"2026-11-13T10:46:32.884Z","level":"info","msg":"request","requestId":"4516b592-13cf-4ead-b8ad-38b4d12db6fd","method":"GET","route":"/movies/now-playing","status":200,"durationMs":4.57,"outcome":"ok","cache":"miss"}
+{"ts":"2026-11-13T10:46:32.889Z","level":"info","msg":"request","requestId":"96964be0-fb54-45bc-9ef5-d6647fcaedad","method":"GET","route":"/movies/now-playing","status":200,"durationMs":1.25,"outcome":"ok","cache":"hit"}
+{"ts":"2026-11-13T10:46:32.891Z","level":"info","msg":"request","requestId":"64bd52c5-1170-4ce0-b8c0-b95d6c0db7a3","method":"GET","route":"/movies/search","status":200,"durationMs":0.82,"outcome":"ok","cache":"miss"}
+{"ts":"2026-11-13T10:46:32.892Z","level":"info","msg":"request","requestId":"87752e82-115c-4914-af28-974b698189bd","method":"GET","route":"/movies/search","status":200,"durationMs":0.37,"outcome":"ok","cache":"hit"}
+{"ts":"2026-11-13T10:46:32.893Z","level":"warn","msg":"request","requestId":"c04aced7-e1d3-4ca8-90de-b71840c86bd1","method":"GET","route":"/movies/now-playing","status":400,"durationMs":0.64,"outcome":"rejected","errorCode":"validation_failed"}
+{"ts":"2026-11-13T10:46:32.894Z","level":"warn","msg":"request","requestId":"2eed0c72-de1d-414a-a62a-9d9f976e5c72","method":"GET","route":"/movies/search","status":400,"durationMs":0.24,"outcome":"rejected","errorCode":"validation_failed"}
+{"ts":"2026-11-13T10:46:32.895Z","level":"warn","msg":"tmdb_attempt_failed","attempt":1,"reason":"upstream_error","upstreamStatus":503,"durationMs":1}
+{"ts":"2026-11-13T10:46:33.059Z","level":"warn","msg":"tmdb_attempt_failed","attempt":2,"reason":"upstream_error","upstreamStatus":503,"durationMs":0}
+{"ts":"2026-11-13T10:46:33.446Z","level":"warn","msg":"tmdb_attempt_failed","attempt":3,"reason":"upstream_error","upstreamStatus":503,"durationMs":0}
+{"ts":"2026-11-13T10:46:33.446Z","level":"warn","msg":"movies_served_stale","cache":"stale","reason":"upstream_error"}
+{"ts":"2026-11-13T10:46:33.447Z","level":"info","msg":"request","requestId":"10704961-82c6-42e2-92d2-c853f4051a6a","method":"GET","route":"/movies/now-playing","status":200,"durationMs":553.12,"outcome":"ok","cache":"stale"}
+{"ts":"2026-11-13T10:46:33.452Z","level":"warn","msg":"tmdb_attempt_failed","attempt":1,"reason":"upstream_error","upstreamStatus":503,"durationMs":1}
+{"ts":"2026-11-13T10:46:33.621Z","level":"warn","msg":"tmdb_attempt_failed","attempt":2,"reason":"upstream_error","upstreamStatus":503,"durationMs":1}
+{"ts":"2026-11-13T10:46:33.999Z","level":"warn","msg":"tmdb_attempt_failed","attempt":3,"reason":"upstream_error","upstreamStatus":503,"durationMs":1}
+{"ts":"2026-11-13T10:46:33.999Z","level":"warn","msg":"request_rejected","requestId":"daab8edd-0fba-4245-a1d9-7e2fc17034ed","errorCode":"upstream_unavailable","reason":"movie source: upstream_error"}
+{"ts":"2026-11-13T10:46:34.000Z","level":"error","msg":"request","requestId":"daab8edd-0fba-4245-a1d9-7e2fc17034ed","method":"GET","route":"/movies/search","status":503,"durationMs":549.87,"outcome":"error","errorCode":"upstream_unavailable"}
+{"ts":"2026-11-13T10:46:34.006Z","level":"info","msg":"request","requestId":"16f1c787-7037-4ea2-a442-75ee6c87cd3b","method":"GET","route":"/movies/now-playing","status":200,"durationMs":2.55,"outcome":"ok","cache":"miss"}
