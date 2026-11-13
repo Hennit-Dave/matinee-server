@@ -8,3 +8,8 @@
 # entropy alone. Commit e1b2f94 is already pushed, and history is never rewritten here.
 e1b2f94710035dea332a68ae4a775e91b8bde37f:src/http/logger.test.ts:generic-api-key:13
 e1b2f94710035dea332a68ae4a775e91b8bde37f:src/movies/tmdb.test.ts:generic-api-key:85
+
+# PR #8 squash commit: the same two verified dummy test values above.
+# Squashing changes the commit component of each Gitleaks fingerprint.
+3957a94ec60e3e82b5b0407362653a3b5adbb118:src/http/logger.test.ts:generic-api-key:13
+3957a94ec60e3e82b5b0407362653a3b5adbb118:src/movies/tmdb.test.ts:generic-api-key:85
