@@ -57,6 +57,7 @@ Ten-minute rule: if a blocking unknown can be settled by trying it, try it. That
 
 ## 4. Non-negotiables
 
+- **Git housekeeping is the agent's job; Dave only squash-merges.** Dave's single manual git action is the squash-merge on GitHub. Agents handle everything else: creating feature branches, deleting merged branches after a squash-merge, resolving leftover stashes, and clearing recurring tooling noise (e.g. expo-env.d.ts / .gitignore churn). Agents never merge PRs or force-push. When cleanup needs code changes, open a small PR for Dave to squash-merge.
 - **No AI attribution in git.** Never add `Co-Authored-By`, `Claude-Session`, "Generated with" or any other AI credit line to a commit message or PR description. Dave is the only author. The `.githooks/commit-msg` hook rejects them; after a fresh clone run `git config core.hooksPath .githooks`.
 - **Never trust the frontend.** Identity, price, fee, total, seat state, payment state: server only.
 - **Money = integer minor units.** No decimals or floats anywhere. Server returns finished display strings. The app never computes a total.
