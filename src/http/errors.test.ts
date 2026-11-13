@@ -56,3 +56,14 @@ test('an unexpected error becomes internal_error without leaking its message', (
   assert.equal(body.error.code, 'internal_error');
   assert.ok(!JSON.stringify(body).includes('db password'));
 });
+
+test('upstream_unavailable is a retryable 503 and its internal reason is not sent', () => {
+  assert.equal(new ApiError('upstream_unavailable').status, 503);
+  const handler = createErrorHandler(createLogger(() => {}));
+  const { res, state } = fakeRes();
+  handler(new ApiError('upstream_unavailable', { reason: 'movie source: rejected' }), {} as never, res, (() => {}) as never);
+  const body = state.body as { error: { code: string } };
+  assert.equal(state.status, 503);
+  assert.equal(body.error.code, 'upstream_unavailable');
+  assert.ok(!JSON.stringify(body).includes('rejected'));
+});

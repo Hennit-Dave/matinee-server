@@ -12,7 +12,8 @@ export type ErrorCode =
   | 'invalid_json'
   | 'payload_too_large'
   | 'internal_error'
-  | 'service_unavailable';
+  | 'service_unavailable'
+  | 'upstream_unavailable';
 
 const STATUS: Record<ErrorCode, number> = {
   not_found: 404,
@@ -21,6 +22,7 @@ const STATUS: Record<ErrorCode, number> = {
   payload_too_large: 413,
   internal_error: 500,
   service_unavailable: 503,
+  upstream_unavailable: 503,
 };
 
 // Safe English defaults for debugging. The app owns user-facing copy and switches on `code`.
@@ -31,6 +33,8 @@ const MESSAGE: Record<ErrorCode, string> = {
   payload_too_large: 'The request body is too large.',
   internal_error: 'Something went wrong.',
   service_unavailable: 'The service is temporarily unavailable.',
+  // A third party we depend on (TMDB) is down and we have nothing cached. Retryable.
+  upstream_unavailable: 'Movie data is temporarily unavailable. Please try again shortly.',
 };
 
 /** One field-level problem. Never carries the submitted value. */
