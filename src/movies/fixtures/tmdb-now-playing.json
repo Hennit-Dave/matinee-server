@@ -1,0 +1,62 @@
+{
+  "dates": { "maximum": "2026-11-18", "minimum": "2026-10-07" },
+  "page": 1,
+  "results": [
+    {
+      "adult": false,
+      "backdrop_path": "/fx-backdrop-1.jpg",
+      "genre_ids": [18, 53],
+      "id": 900001,
+      "original_language": "en",
+      "original_title": "The Last Projectionist",
+      "overview": "A retired projectionist guards the final reel of a lost film.",
+      "popularity": 412.337,
+      "poster_path": "/fxPosterOne.jpg",
+      "release_date": "2026-11-07",
+      "title": "The Last Projectionist",
+      "video": false,
+      "vote_average": 7.8,
+      "vote_count": 1204
+    },
+    {
+      "adult": false,
+      "backdrop_path": null,
+      "genre_ids": [],
+      "id": 900002,
+      "original_language": "fr",
+      "original_title": "Sans Affiche",
+      "overview": "",
+      "popularity": 3.1,
+      "poster_path": null,
+      "release_date": "",
+      "title": "No Poster, No Date",
+      "video": false,
+      "vote_average": 0,
+      "vote_count": 0
+    },
+    {
+      "adult": false,
+      "backdrop_path": "/fx-backdrop-3.jpg",
+      "genre_ids": [878],
+      "id": 900003,
+      "original_language": "en",
+      "original_title": "Long Synopsis",
+      "overview": "In the spring of a year nobody remembers, a cartographer discovers that every map she has ever drawn\nhas quietly come true, and the coastline she sketched last night is already eroding under the feet of the town that trusted her.\n\nNow she must redraw the world before the tide does.",
+      "popularity": 98.2,
+      "poster_path": "/fxPosterThree.jpg",
+      "release_date": "2025-03-14",
+      "title": "Long Synopsis",
+      "video": false,
+      "vote_average": 6.4,
+      "vote_count": 311
+    },
+    {
+      "id": 900004,
+      "overview": null,
+      "release_date": null,
+      "title": "Sparse Record"
+    }
+  ],
+  "total_pages": 42,
+  "total_results": 837
+}

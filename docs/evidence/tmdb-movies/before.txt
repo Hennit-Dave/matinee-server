@@ -1,0 +1,11 @@
+# Baseline (before the TMDB slice), main @ 9eec4f9
+# Produced in-process against createApp() with stub db/redis; no real service or .env involved.
+
+$ curl -i http://localhost:3000/movies/now-playing?page=1
+HTTP 404
+{"error":{"code":"not_found","message":"Not found.","requestId":"f6d40b95-2ab1-42bb-a5ab-f80899f47c68"}}
+
+$ curl -i http://localhost:3000/movies/search?q=dune&page=1
+HTTP 404
+{"error":{"code":"not_found","message":"Not found.","requestId":"6611b5fc-81c4-48c2-88c8-0af48f2c40e7"}}
+

@@ -1,0 +1,77 @@
+# Live smoke test — real TMDB — Fri Nov 13 05:41:48 CST 2026
+
+Earlier manual body check: now-playing results included title,
+year, overview, and image.tmdb.org poster URLs.
+
+== GET /movies/now-playing?page=1 ==
+HTTP/1.1 200 OK
+X-Powered-By: Express
+X-Request-Id: f9017e3c-cbd2-4e40-9349-ddc3213f866d
+X-Cache: MISS
+Content-Type: application/json; charset=utf-8
+Content-Length: 6586
+ETag: W/"19ba-rhQDsKT0m5ssgOHpLQ3daEacU9o"
+Date: Fri, 13 Nov 2026 11:41:48 GMT
+Connection: keep-alive
+Keep-Alive: timeout=5
+
+
+== GET /movies/now-playing?page=1 ==
+HTTP/1.1 200 OK
+X-Powered-By: Express
+X-Request-Id: cffc2d7f-6c33-46df-adac-4ff2da7e3631
+X-Cache: HIT
+Content-Type: application/json; charset=utf-8
+Content-Length: 6586
+ETag: W/"19ba-rhQDsKT0m5ssgOHpLQ3daEacU9o"
+Date: Fri, 13 Nov 2026 11:41:48 GMT
+Connection: keep-alive
+Keep-Alive: timeout=5
+
+
+== GET /movies/search?q=dune ==
+HTTP/1.1 200 OK
+X-Powered-By: Express
+X-Request-Id: de2e2a31-1eb6-49ae-860d-433350ac1602
+X-Cache: MISS
+Content-Type: application/json; charset=utf-8
+Content-Length: 6399
+ETag: W/"18ff-+Zw0uQrmg1LnZ3k0e9pO7eCL/hM"
+Date: Fri, 13 Nov 2026 11:41:49 GMT
+Connection: keep-alive
+Keep-Alive: timeout=5
+
+
+== GET /movies/search?q=%20DUNE%20 ==
+HTTP/1.1 200 OK
+X-Powered-By: Express
+X-Request-Id: 7eed46b7-d3c0-4abc-aea8-a95eb0c4d2a3
+X-Cache: HIT
+Content-Type: application/json; charset=utf-8
+Content-Length: 6399
+ETag: W/"18ff-+Zw0uQrmg1LnZ3k0e9pO7eCL/hM"
+Date: Fri, 13 Nov 2026 11:41:49 GMT
+Connection: keep-alive
+Keep-Alive: timeout=5
+
+
+== Invalid page: expected 400 and validation_failed ==
+HTTP/1.1 400 Bad Request
+X-Powered-By: Express
+X-Request-Id: 6134068e-3b29-4ff9-935d-c718ee4c45c0
+Content-Type: application/json; charset=utf-8
+Content-Length: 189
+ETag: W/"bd-rDD5Hoh+wyEYNnLpM5E11/Qu4eE"
+Date: Fri, 13 Nov 2026 11:41:49 GMT
+Connection: keep-alive
+Keep-Alive: timeout=5
+
+{"error":{"code":"validation_failed","message":"The request was not valid.","requestId":"6134068e-3b29-4ff9-935d-c718ee4c45c0","details":[{"path":"query.page","code":"too_short","min":1}]}}
+
+== Redis keys ==
+movies:v1:now-playing:page:1
+movies:v1:search:dune:page:1
+== TTL: now-playing page 1 ==
+97200
+== TTL: dune search page 1 ==
+3900

@@ -9,8 +9,9 @@ The API, background jobs and database behind Matinee, a cinema ticket booking ap
 ## Status
 
 Slice 0: an Express + TypeScript skeleton with a real `/health` (checks Postgres primary + replica
-and Redis, 503 on failure), structured logging, request IDs and a Zod validation helper. No
-business routes yet. This README is written as the build goes.
+and Redis, 503 on failure), structured logging, request IDs and a Zod validation helper.
+Slice 1: the movie endpoints below (TMDB through this server, cached in Redis). Showtimes, seats
+and bookings are not built yet. This README is written as the build goes.
 
 ## What it is
 
@@ -44,6 +45,26 @@ brew services start redis   # runs in the background at redis://localhost:6379
 ```
 
 Set `REDIS_URL=redis://localhost:6379` in `.env`. Stop it later with `brew services stop redis`.
+
+## Movie endpoints
+
+The app never calls TMDB; these two routes are the only path to movie data (`TMDB_READ_TOKEN` is
+read from `.env` and never leaves the server).
+
+| Route | Query | Returns |
+|---|---|---|
+| `GET /movies/now-playing` | `page` (1-500, default 1) | `{ movies, page, totalPages, totalResults }` |
+| `GET /movies/search` | `q` (required, 1-100 chars after trimming), `page` | same shape |
+
+The response contract (`Movie` and `MoviesPage`, as Zod schemas) is in `src/movies/movie.ts`;
+`src/movies/tmdb.ts` is the only file that knows TMDB's response shape. Bad input is a `400
+validation_failed`; TMDB down with nothing cached is a `503 upstream_unavailable`. The `X-Cache`
+response header (`HIT`, `MISS` or `STALE`) says where the data came from.
+
+**Cache TTLs (Redis, cache-aside, reasons in `src/movies/service.ts`):** now-playing is fresh for 3
+hours (the list changes about daily), search for 5 minutes (unbounded distinct queries, so keep it
+short); each key is kept for 24 h / 1 h longer than that purely to serve if TMDB is down, so every
+key still expires (27 h and 65 min in Redis).
 
 ## Docs
 

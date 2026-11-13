@@ -20,6 +20,9 @@ const ALLOWED = [
   'reason',
   'check',
   'port',
+  'cache',
+  'attempt',
+  'upstreamStatus',
 ] as const;
 export type LogField = (typeof ALLOWED)[number];
 export type LogFields = Partial<Record<LogField, string | number | boolean>>;
@@ -76,6 +79,7 @@ export const recordRouteBase: RequestHandler = (req, res, next) => {
 /**
  * One line per request: request ID, route TEMPLATE (never the raw URL), status, duration, and the
  * error code on failure. Handlers set `res.locals.errorCode`; the error handler also sets it.
+ * Routes that serve cached data also set `res.locals.cache` so the line says where the data came from.
  */
 export function requestLogger(logger: Logger): RequestHandler {
   return (req, res, next) => {
@@ -94,6 +98,7 @@ export function requestLogger(logger: Logger): RequestHandler {
         outcome: aborted ? 'aborted' : status >= 500 ? 'error' : status >= 400 ? 'rejected' : 'ok',
       };
       if (res.locals.errorCode) fields.errorCode = String(res.locals.errorCode);
+      if (res.locals.cache) fields.cache = String(res.locals.cache);
       const level: LogLevel = status >= 500 ? 'error' : status >= 400 ? 'warn' : 'info';
       logger[level]('request', fields);
     });
