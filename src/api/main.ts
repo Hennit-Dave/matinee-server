@@ -1,6 +1,9 @@
 import { closeDbClients, createDbClients } from '../db/clients.js';
 import { createLogger } from '../http/logger.js';
 import { createRedisClient } from '../jobs/connection.js';
+import { createMovieCache, createRedisStore } from '../movies/cache.js';
+import { createMovieService } from '../movies/service.js';
+import { createTmdbMovieSource } from '../movies/tmdb.js';
 import { createApp } from './app.js';
 
 // Local-development default only; a host injects its own PORT.
@@ -16,15 +19,24 @@ function readPort(): number {
   return port;
 }
 
+// Never logged or echoed: only its absence is reported, by name.
+function readTmdbToken(): string {
+  const token = process.env.TMDB_READ_TOKEN;
+  if (!token) throw new Error('TMDB_READ_TOKEN is not set.');
+  return token;
+}
+
 const logger = createLogger();
 
 // A bad or missing env var stops the server before it listens: never start weaker. Every boot
 // and shutdown line goes through the logger — no console.log/console.error anywhere (AGENTS.md).
 let port: number;
 let db: ReturnType<typeof createDbClients>;
+let tmdbReadToken: string;
 try {
   port = readPort();
   db = createDbClients();
+  tmdbReadToken = readTmdbToken();
 } catch (err) {
   logger.error('api_start_failed', { reason: err instanceof Error ? err.message : String(err) });
   process.exit(1);
@@ -36,7 +48,13 @@ void redis.connect().catch(() => {
   // retrying in the background.
 });
 
-const app = createApp({ logger, db, redis });
+const movies = createMovieService({
+  source: createTmdbMovieSource({ readToken: tmdbReadToken, logger }),
+  cache: createMovieCache({ store: createRedisStore(redis), logger }),
+  logger,
+});
+
+const app = createApp({ logger, db, redis, movies });
 
 const server = app.listen(port, () => {
   logger.info('api_listening', { port });
