@@ -1,7 +1,7 @@
 import type { Redis } from 'ioredis';
 import { z } from 'zod';
 import type { Logger } from '../http/logger.js';
-import { MoviesPageSchema, type MoviesPage } from './movie.js';
+import { MovieDetailSchema, MoviesPageSchema, type MovieDetail, type MoviesPage } from './movie.js';
 
 /**
  * Cache-aside storage for movie pages. It stores OUR mapped MoviesPage, never TMDB's raw
@@ -44,9 +44,16 @@ export function createRedisStore(redis: Pick<Redis, 'get' | 'set' | 'status'>): 
 }
 
 const EntrySchema = z.strictObject({ freshUntil: z.number(), page: MoviesPageSchema });
+const DetailEntrySchema = z.strictObject({ freshUntil: z.number(), movie: MovieDetailSchema });
 
 export interface CacheEntry {
   page: MoviesPage;
+  /** Epoch ms. Before this the entry is fresh; after it, stale (usable only as a fallback). */
+  freshUntil: number;
+}
+
+export interface DetailCacheEntry {
+  movie: MovieDetail;
   /** Epoch ms. Before this the entry is fresh; after it, stale (usable only as a fallback). */
   freshUntil: number;
 }
@@ -56,6 +63,10 @@ export interface MovieCache {
   read(key: string): Promise<CacheEntry | null>;
   /** Best effort. Never throws. */
   write(key: string, page: MoviesPage, freshTtlSeconds: number, staleGraceSeconds: number): Promise<void>;
+  /** The detail entry, or null on a miss, a corrupt/old-shape entry, or an unreachable Redis. Never throws. */
+  readDetail(key: string): Promise<DetailCacheEntry | null>;
+  /** Best effort. Never throws. */
+  writeDetail(key: string, movie: MovieDetail, freshTtlSeconds: number, staleGraceSeconds: number): Promise<void>;
 }
 
 async function withTimeout<T>(promise: Promise<T>): Promise<T> {
@@ -74,34 +85,40 @@ export function createMovieCache(deps: { store: CacheStore; logger: Logger; now?
   const { store, logger } = deps;
   const now = deps.now ?? Date.now;
 
+  async function readWithSchema<T>(key: string, schema: z.ZodType<T>): Promise<T | null> {
+    let raw: string | null;
+    try {
+      raw = await withTimeout(store.get(key));
+    } catch (err) {
+      logger.warn('movies_cache_read_failed', { reason: err instanceof Error ? err.message : String(err) });
+      return null;
+    }
+    if (raw === null) return null;
+
+    // Validate against the CURRENT contract: an entry written by an older version of the shape
+    // is a miss and gets rewritten, so a contract change never serves stale-shaped data.
+    try {
+      return schema.parse(JSON.parse(raw));
+    } catch {
+      logger.warn('movies_cache_entry_invalid', { reason: 'unreadable or old-shape entry, treated as a miss' });
+      return null;
+    }
+  }
+
+  async function writeEntry(key: string, payload: unknown, freshTtlSeconds: number, staleGraceSeconds: number) {
+    try {
+      await withTimeout(store.set(key, JSON.stringify(payload), freshTtlSeconds + staleGraceSeconds));
+    } catch (err) {
+      logger.warn('movies_cache_write_failed', { reason: err instanceof Error ? err.message : String(err) });
+    }
+  }
+
   return {
-    async read(key) {
-      let raw: string | null;
-      try {
-        raw = await withTimeout(store.get(key));
-      } catch (err) {
-        logger.warn('movies_cache_read_failed', { reason: err instanceof Error ? err.message : String(err) });
-        return null;
-      }
-      if (raw === null) return null;
-
-      // Validate against the CURRENT contract: an entry written by an older version of the shape
-      // is a miss and gets rewritten, so a contract change never serves stale-shaped data.
-      try {
-        return EntrySchema.parse(JSON.parse(raw));
-      } catch {
-        logger.warn('movies_cache_entry_invalid', { reason: 'unreadable or old-shape entry, treated as a miss' });
-        return null;
-      }
-    },
-
-    async write(key, page, freshTtlSeconds, staleGraceSeconds) {
-      const entry: CacheEntry = { page, freshUntil: now() + freshTtlSeconds * 1000 };
-      try {
-        await withTimeout(store.set(key, JSON.stringify(entry), freshTtlSeconds + staleGraceSeconds));
-      } catch (err) {
-        logger.warn('movies_cache_write_failed', { reason: err instanceof Error ? err.message : String(err) });
-      }
-    },
+    read: (key) => readWithSchema(key, EntrySchema),
+    write: (key, page, freshTtlSeconds, staleGraceSeconds) =>
+      writeEntry(key, { page, freshUntil: now() + freshTtlSeconds * 1000 }, freshTtlSeconds, staleGraceSeconds),
+    readDetail: (key) => readWithSchema(key, DetailEntrySchema),
+    writeDetail: (key, movie, freshTtlSeconds, staleGraceSeconds) =>
+      writeEntry(key, { movie, freshUntil: now() + freshTtlSeconds * 1000 }, freshTtlSeconds, staleGraceSeconds),
   };
 }

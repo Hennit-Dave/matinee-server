@@ -1,8 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  DETAIL_OVERVIEW_MAX_LENGTH,
+  MAX_MOVIE_ID,
   MAX_PAGE,
   MAX_QUERY_LENGTH,
+  MovieDetailSchema,
+  MovieIdParamsSchema,
   MovieSchema,
   MoviesPageSchema,
   NowPlayingQuerySchema,
@@ -58,4 +62,73 @@ test('search ?q must be present, non-empty after trimming, and at most MAX_QUERY
   assert.throws(() => SearchQuerySchema.parse({ q: ['a', 'b'] }));
   assert.doesNotThrow(() => SearchQuerySchema.parse({ q: 'a'.repeat(MAX_QUERY_LENGTH) }));
   assert.throws(() => SearchQuerySchema.parse({ q: 'a'.repeat(MAX_QUERY_LENGTH + 1) }));
+});
+
+test('MovieDetail contract has the expected fields and bounds', () => {
+  assert.deepEqual(Object.keys(MovieDetailSchema.shape).sort(), [
+    'backdropUrl',
+    'genres',
+    'id',
+    'overview',
+    'posterUrl',
+    'rating',
+    'releaseDate',
+    'runtimeMinutes',
+    'tagline',
+    'title',
+    'year',
+  ]);
+  assert.doesNotThrow(() =>
+    MovieDetailSchema.parse({
+      id: 1,
+      title: 'T',
+      overview: 'x'.repeat(250),
+      posterUrl: 'https://image.tmdb.org/t/p/w500/a.jpg',
+      backdropUrl: 'https://image.tmdb.org/t/p/w780/b.jpg',
+      year: 2026,
+      releaseDate: '2026-11-07',
+      runtimeMinutes: 128,
+      genres: ['Drama'],
+      rating: 7.8,
+      tagline: 'Every frame leaves a trace.',
+    }),
+  );
+  assert.doesNotThrow(() =>
+    MovieDetailSchema.parse({
+      id: 1,
+      title: 'T',
+      overview: null,
+      posterUrl: null,
+      backdropUrl: null,
+      year: null,
+      releaseDate: null,
+      runtimeMinutes: null,
+      genres: [],
+      rating: null,
+      tagline: null,
+    }),
+  );
+  assert.throws(() =>
+    MovieDetailSchema.parse({
+      id: 1,
+      title: 'T',
+      overview: 'x'.repeat(DETAIL_OVERVIEW_MAX_LENGTH + 1),
+      posterUrl: null,
+      backdropUrl: null,
+      year: null,
+      releaseDate: null,
+      runtimeMinutes: null,
+      genres: [],
+      rating: null,
+      tagline: null,
+    }),
+  );
+});
+
+test('MovieIdParamsSchema accepts positive integer ids and rejects non-numeric or out-of-range ids', () => {
+  assert.equal(MovieIdParamsSchema.parse({ id: '42' }).id, 42);
+  assert.equal(MovieIdParamsSchema.parse({ id: String(MAX_MOVIE_ID) }).id, MAX_MOVIE_ID);
+  for (const bad of ['0', '-1', 'now-playing', 'search', '1.5', '1e2', '0x10', ' 7', '', String(MAX_MOVIE_ID + 1)]) {
+    assert.throws(() => MovieIdParamsSchema.parse({ id: bad }), `id=${JSON.stringify(bad)} must be rejected`);
+  }
 });

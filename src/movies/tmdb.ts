@@ -1,9 +1,11 @@
 import { z } from 'zod';
 import type { Logger } from '../http/logger.js';
 import {
+  DETAIL_OVERVIEW_MAX_LENGTH,
   MovieSourceError,
   OVERVIEW_MAX_LENGTH,
   type Movie,
+  type MovieDetail,
   type MoviesPage,
   type MovieSource,
 } from './movie.js';
@@ -34,19 +36,34 @@ const TmdbListSchema = z.object({
   total_results: z.number().int().nonnegative(),
 });
 
+const TmdbMovieDetailSchema = TmdbMovieSchema.extend({
+  backdrop_path: z.string().nullish(),
+  runtime: z.number().int().nonnegative().nullish(),
+  genres: z.array(z.object({ name: z.string() })).nullish(),
+  vote_average: z.number().nullish(),
+  vote_count: z.number().int().nonnegative().nullish(),
+  tagline: z.string().nullish(),
+});
+
 const API_BASE = 'https://api.themoviedb.org/3';
 
 /**
- * TMDB's image CDN: base + size + `poster_path` (which starts with "/"). w500 is one of TMDB's
- * fixed poster sizes and is sharp for a 2-3 column phone grid without the weight of "original".
- * The app is handed the finished URL and never learns any of this.
+ * TMDB's image CDN: base + size + path (which starts with "/").
+ * - w500 is sharp for a 2-3 column phone poster grid without the weight of "original".
+ * - w780 fits a full-width detail backdrop cleanly.
+ * The app is handed the finished URLs and never learns any of this.
  */
 const IMAGE_BASE = 'https://image.tmdb.org/t/p/w500';
+const BACKDROP_IMAGE_BASE = 'https://image.tmdb.org/t/p/w780';
 
-// ---- Mapping: TMDB -> our Movie -------------------------------------------------------------
+// ---- Mapping: TMDB -> our Movie / MovieDetail -----------------------------------------------
 
 function toPosterUrl(posterPath: string | null | undefined): string | null {
   return posterPath ? `${IMAGE_BASE}${posterPath}` : null;
+}
+
+function toBackdropUrl(backdropPath: string | null | undefined): string | null {
+  return backdropPath ? `${BACKDROP_IMAGE_BASE}${backdropPath}` : null;
 }
 
 function toYear(releaseDate: string | null | undefined): number | null {
@@ -55,16 +72,40 @@ function toYear(releaseDate: string | null | undefined): number | null {
   return year > 0 ? year : null;
 }
 
-/** Whitespace-tidy, then cut to OVERVIEW_MAX_LENGTH on a word boundary with an ellipsis. */
-function toOverview(overview: string | null | undefined): string | null {
+function toReleaseDate(releaseDate: string | null | undefined): string | null {
+  const trimmed = (releaseDate ?? '').trim();
+  return /^\d{4}-\d{2}-\d{2}$/.test(trimmed) ? trimmed : null;
+}
+
+/** Whitespace-tidy, then cut to `maxLength` on a word boundary with an ellipsis. */
+function toOverview(overview: string | null | undefined, maxLength = OVERVIEW_MAX_LENGTH): string | null {
   const text = (overview ?? '').trim().replace(/\s+/g, ' ');
   if (!text) return null;
   const chars = Array.from(text); // code points, so we never split an emoji in half
-  if (chars.length <= OVERVIEW_MAX_LENGTH) return text;
-  const cut = chars.slice(0, OVERVIEW_MAX_LENGTH - 1).join('');
+  if (chars.length <= maxLength) return text;
+  const cut = chars.slice(0, maxLength - 1).join('');
   const lastSpace = cut.lastIndexOf(' ');
-  const onWord = lastSpace > OVERVIEW_MAX_LENGTH * 0.6 ? cut.slice(0, lastSpace) : cut;
+  const onWord = lastSpace > maxLength * 0.6 ? cut.slice(0, lastSpace) : cut;
   return `${onWord.trimEnd()}…`;
+}
+
+function toRuntimeMinutes(runtime: number | null | undefined): number | null {
+  return runtime && runtime > 0 ? runtime : null;
+}
+
+function toGenres(genres: Array<{ name: string }> | null | undefined): string[] {
+  return (genres ?? []).map((g) => g.name.trim()).filter(Boolean);
+}
+
+function toRating(voteAverage: number | null | undefined, voteCount: number | null | undefined): number | null {
+  if (voteAverage == null || voteAverage <= 0 || voteCount === 0) return null;
+  const rounded = Math.round(voteAverage * 10) / 10;
+  return Math.min(10, Math.max(0, rounded));
+}
+
+function toTagline(tagline: string | null | undefined): string | null {
+  const trimmed = (tagline ?? '').trim().replace(/\s+/g, ' ');
+  return trimmed || null;
 }
 
 export function mapTmdbMovie(raw: z.infer<typeof TmdbMovieSchema>): Movie {
@@ -73,7 +114,7 @@ export function mapTmdbMovie(raw: z.infer<typeof TmdbMovieSchema>): Movie {
     title: raw.title,
     posterUrl: toPosterUrl(raw.poster_path),
     year: toYear(raw.release_date),
-    overview: toOverview(raw.overview),
+    overview: toOverview(raw.overview, OVERVIEW_MAX_LENGTH),
   };
 }
 
@@ -85,6 +126,24 @@ export function mapTmdbPage(body: unknown): MoviesPage {
     page: list.page,
     totalPages: list.total_pages,
     totalResults: list.total_results,
+  };
+}
+
+/** Parses a TMDB `/movie/{id}` response into our MovieDetail. Throws ZodError if the shape is not what we expect. */
+export function mapTmdbMovieDetail(body: unknown): MovieDetail {
+  const raw = TmdbMovieDetailSchema.parse(body);
+  return {
+    id: raw.id,
+    title: raw.title,
+    overview: toOverview(raw.overview, DETAIL_OVERVIEW_MAX_LENGTH),
+    posterUrl: toPosterUrl(raw.poster_path),
+    backdropUrl: toBackdropUrl(raw.backdrop_path),
+    year: toYear(raw.release_date),
+    releaseDate: toReleaseDate(raw.release_date),
+    runtimeMinutes: toRuntimeMinutes(raw.runtime),
+    genres: toGenres(raw.genres),
+    rating: toRating(raw.vote_average, raw.vote_count),
+    tagline: toTagline(raw.tagline),
   };
 }
 
@@ -130,8 +189,13 @@ export function createTmdbMovieSource(deps: TmdbDeps): MovieSource {
   const random = deps.random ?? Math.random;
   const now = deps.now ?? Date.now;
 
-  /** GET `path` and return TMDB's parsed list as our page. Retries only transient failures. */
-  async function getPage(path: string, params: Record<string, string>): Promise<MoviesPage> {
+  /** GET `path`, parse JSON and map with `map`. Retries only transient failures. */
+  async function requestTmdb<T>(
+    path: string,
+    params: Record<string, string>,
+    map: (body: unknown) => T,
+    options: { allowNotFound?: boolean } = {},
+  ): Promise<T | null> {
     const url = new URL(`${API_BASE}${path}`);
     for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
     url.searchParams.set('language', 'en-US');
@@ -162,7 +226,7 @@ export function createTmdbMovieSource(deps: TmdbDeps): MovieSource {
             throw new MovieSourceError('invalid_json', res.status);
           }
           try {
-            return mapTmdbPage(body);
+            return map(body);
           } catch {
             throw new MovieSourceError('bad_shape', res.status);
           }
@@ -170,6 +234,9 @@ export function createTmdbMovieSource(deps: TmdbDeps): MovieSource {
 
         // Free the socket; we never read or log an error body. Not awaited: nothing here may block.
         void res.body?.cancel().catch(() => {});
+        if (options.allowNotFound && res.status === 404) {
+          return null;
+        }
         if (res.status === 429) {
           hintMs = retryAfterMs(res.headers.get('retry-after'));
           lastFailure = new MovieSourceError('rate_limited', 429);
@@ -212,9 +279,10 @@ export function createTmdbMovieSource(deps: TmdbDeps): MovieSource {
   }
 
   return {
-    nowPlaying: (page) => getPage('/movie/now_playing', { page: String(page) }),
-    search: (query, page) =>
-      getPage('/search/movie', { query, page: String(page), include_adult: 'false' }),
+    nowPlaying: async (page) => (await requestTmdb('/movie/now_playing', { page: String(page) }, mapTmdbPage))!,
+    search: async (query, page) =>
+      (await requestTmdb('/search/movie', { query, page: String(page), include_adult: 'false' }, mapTmdbPage))!,
+    detail: (id) => requestTmdb(`/movie/${id}`, {}, mapTmdbMovieDetail, { allowNotFound: true }),
   };
 }
 

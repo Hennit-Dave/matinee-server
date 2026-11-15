@@ -6,8 +6,11 @@ import { z } from 'zod';
  * field names; `tmdb.ts` is the only file that does, and it maps INTO these types.
  */
 
-/** Longest `overview` we send. The list screens need a teaser, not TMDB's full synopsis. */
+/** Longest `overview` we send on list screens. The list screens need a teaser, not TMDB's full synopsis. */
 export const OVERVIEW_MAX_LENGTH = 200;
+
+/** Longest `overview` we send on the detail screen. Full synopsis, still bounded for cache/payload safety. */
+export const DETAIL_OVERVIEW_MAX_LENGTH = 2_000;
 
 export const MovieSchema = z.strictObject({
   /** Stable movie id. Opaque to the app; later slices (showtimes) key on it. */
@@ -32,6 +35,31 @@ export const MoviesPageSchema = z.strictObject({
 });
 export type MoviesPage = z.infer<typeof MoviesPageSchema>;
 
+export const MovieDetailSchema = z.strictObject({
+  /** Stable movie id. Opaque to the app; later slices (showtimes) key on it. */
+  id: z.number().int().positive(),
+  title: z.string(),
+  /** Full synopsis, whitespace-tidied and capped at DETAIL_OVERVIEW_MAX_LENGTH. null when absent. */
+  overview: z.string().max(DETAIL_OVERVIEW_MAX_LENGTH).nullable(),
+  /** Ready-to-load poster URL (w500), built server-side. null when the movie has no poster. */
+  posterUrl: z.url().nullable(),
+  /** Ready-to-load backdrop URL (w780), built server-side. null when the movie has no backdrop. */
+  backdropUrl: z.url().nullable(),
+  /** Release year (e.g. 2026). null when the release date is unknown. */
+  year: z.number().int().positive().nullable(),
+  /** Canonical YYYY-MM-DD release date. null when unknown or blank. */
+  releaseDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable(),
+  /** Runtime in whole minutes (> 0). null when unknown or 0. */
+  runtimeMinutes: z.number().int().positive().nullable(),
+  /** Genre names in provider order. */
+  genres: z.array(z.string().min(1)),
+  /** Audience rating on a 0..10 scale rounded to 1 decimal place. null when unrated. */
+  rating: z.number().min(0).max(10).nullable(),
+  /** Short promotional tagline, trimmed. null when absent or blank. */
+  tagline: z.string().nullable(),
+});
+export type MovieDetail = z.infer<typeof MovieDetailSchema>;
+
 // ---- Request schemas (Zod on every request, AGENTS.md section 4) -----------------------------
 
 /** TMDB serves at most 500 pages per list; asking beyond that is a guaranteed upstream error. */
@@ -39,6 +67,9 @@ export const MAX_PAGE = 500;
 
 /** Longest search text we accept. Bounds the cache key and the upstream request. */
 export const MAX_QUERY_LENGTH = 100;
+
+/** Upper bound for a 32-bit positive integer movie ID. */
+export const MAX_MOVIE_ID = 2_147_483_647;
 
 /** `?page=` is digits only (no "1e2", " 3", "0x10"), 1..MAX_PAGE, defaulting to 1. */
 const pageParam = z
@@ -61,6 +92,14 @@ export const SearchQuerySchema = z.strictObject({
   page: pageParam,
 });
 
+export const MovieIdParamsSchema = z.strictObject({
+  id: z
+    .string()
+    .regex(/^\d+$/)
+    .transform(Number)
+    .pipe(z.number().int().min(1).max(MAX_MOVIE_ID)),
+});
+
 // ---- The seam between the service and whatever supplies movies -------------------------------
 
 /** What the rest of the server needs from a movie provider. TMDB is one implementation. */
@@ -68,6 +107,8 @@ export interface MovieSource {
   nowPlaying(page: number): Promise<MoviesPage>;
   /** `query` is already normalised. */
   search(query: string, page: number): Promise<MoviesPage>;
+  /** Full detail for one movie, or null when the provider reports it does not exist (404). */
+  detail(id: number): Promise<MovieDetail | null>;
 }
 
 /**
