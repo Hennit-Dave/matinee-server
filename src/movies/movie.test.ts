@@ -67,8 +67,12 @@ test('search ?q must be present, non-empty after trimming, and at most MAX_QUERY
 test('MovieDetail contract has the expected fields and bounds', () => {
   assert.deepEqual(Object.keys(MovieDetailSchema.shape).sort(), [
     'backdropUrl',
+    'cast',
+    'certification',
+    'director',
     'genres',
     'id',
+    'language',
     'overview',
     'posterUrl',
     'rating',
@@ -91,6 +95,10 @@ test('MovieDetail contract has the expected fields and bounds', () => {
       genres: ['Drama'],
       rating: 7.8,
       tagline: 'Every frame leaves a trace.',
+      certification: '12A',
+      language: 'English',
+      director: 'Arthur Vance',
+      cast: ['First Billed', 'Second Billed'],
     }),
   );
   assert.doesNotThrow(() =>
@@ -106,6 +114,10 @@ test('MovieDetail contract has the expected fields and bounds', () => {
       genres: [],
       rating: null,
       tagline: null,
+      certification: null,
+      language: null,
+      director: null,
+      cast: [],
     }),
   );
   assert.throws(() =>
@@ -121,6 +133,10 @@ test('MovieDetail contract has the expected fields and bounds', () => {
       genres: [],
       rating: null,
       tagline: null,
+      certification: null,
+      language: null,
+      director: null,
+      cast: [],
     }),
   );
 });

@@ -57,6 +57,14 @@ export const MovieDetailSchema = z.strictObject({
   rating: z.number().min(0).max(10).nullable(),
   /** Short promotional tagline, trimmed. null when absent or blank. */
   tagline: z.string().nullable(),
+  /** Age rating / content certification (e.g. "12A", "PG-13"), preferring GB then US. null if none. */
+  certification: z.string().nullable(),
+  /** English display name of the film's primary language (e.g. "English"). null when unknown. */
+  language: z.string().nullable(),
+  /** Director name(s), comma-separated when multiple. null when unknown. */
+  director: z.string().nullable(),
+  /** Top 5 billed cast names in billing order (empty when unavailable). */
+  cast: z.array(z.string()),
 });
 export type MovieDetail = z.infer<typeof MovieDetailSchema>;
 
