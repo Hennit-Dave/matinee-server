@@ -104,6 +104,7 @@ export function normaliseQuery(raw: string): string {
 }
 
 export const NowPlayingQuerySchema = z.strictObject({ page: pageParam });
+export const PopularQuerySchema = z.strictObject({ page: pageParam });
 
 export const SearchQuerySchema = z.strictObject({
   // Length is bounded BEFORE normalising so a huge string is rejected without being processed.
@@ -133,6 +134,7 @@ export const DiscoverQuerySchema = z.strictObject({
 /** What the rest of the server needs from a movie provider. TMDB is one implementation. */
 export interface MovieSource {
   nowPlaying(page: number): Promise<MoviesPage>;
+  popular(page: number): Promise<MoviesPage>;
   /** `query` is already normalised. */
   search(query: string, page: number): Promise<MoviesPage>;
   /** Full detail for one movie, or null when the provider reports it does not exist (404). */

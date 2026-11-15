@@ -69,6 +69,7 @@ function setup() {
     down: false,
     missingId: 404404,
     nowPlayingCalls: 0,
+    popularCalls: 0,
     searchCalls: 0,
     detailCalls: 0,
     genresCalls: 0,
@@ -80,6 +81,11 @@ function setup() {
       tmdb.nowPlayingCalls++;
       if (tmdb.down) throw new MovieSourceError('upstream_error', 503);
       return pageOf(`now-playing ${tmdb.label}`, page);
+    },
+    async popular(page) {
+      tmdb.popularCalls++;
+      if (tmdb.down) throw new MovieSourceError('upstream_error', 503);
+      return pageOf(`popular ${tmdb.label}`, page);
     },
     async search(query, page) {
       tmdb.searchCalls++;
@@ -235,6 +241,9 @@ test('an unexpected error (a bug, not an outage) is not disguised as "TMDB is do
       async nowPlaying() {
         throw new TypeError('bug in the mapper');
       },
+      async popular() {
+        throw new TypeError('bug in the mapper');
+      },
       async search() {
         throw new TypeError('bug in the mapper');
       },
@@ -347,6 +356,37 @@ test('discover(): MISS -> HIT -> stale serve -> 503 when empty and TMDB down', a
   const empty = setup();
   empty.tmdb.down = true;
   await assert.rejects(empty.service.discover(28, 1), (err: unknown) => {
+    assert.ok(err instanceof ApiError);
+    assert.equal(err.status, 503);
+    assert.equal(err.code, 'upstream_unavailable');
+    return true;
+  });
+});
+
+test('popular(): MISS -> HIT -> stale serve -> 503 when empty and TMDB down', async () => {
+  const t = setup();
+
+  const first = await t.service.popular(1);
+  assert.equal(first.cache, 'miss');
+  assert.equal(first.page.movies[0]?.title, 'popular v1');
+  assert.equal(t.tmdb.popularCalls, 1);
+  assert.ok(t.data.has('movies:v1:popular:page:1'));
+
+  t.tmdb.label = 'v2';
+  const hit = await t.service.popular(1);
+  assert.equal(hit.cache, 'hit');
+  assert.equal(hit.page.movies[0]?.title, 'popular v1');
+  assert.equal(t.tmdb.popularCalls, 1);
+
+  t.clock.now += (3 * 60 * 60 + 60) * 1000;
+  t.tmdb.down = true;
+  const stale = await t.service.popular(1);
+  assert.equal(stale.cache, 'stale');
+  assert.equal(stale.page.movies[0]?.title, 'popular v1');
+
+  const empty = setup();
+  empty.tmdb.down = true;
+  await assert.rejects(empty.service.popular(1), (err: unknown) => {
     assert.ok(err instanceof ApiError);
     assert.equal(err.status, 503);
     assert.equal(err.code, 'upstream_unavailable');

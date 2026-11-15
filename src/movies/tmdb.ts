@@ -389,6 +389,7 @@ export function createTmdbMovieSource(deps: TmdbDeps): MovieSource {
 
   return {
     nowPlaying: async (page) => (await requestTmdb('/movie/now_playing', { page: String(page) }, mapTmdbPage))!,
+    popular: async (page) => (await requestTmdb('/movie/popular', { page: String(page) }, mapTmdbPage))!,
     search: async (query, page) =>
       (await requestTmdb('/search/movie', { query, page: String(page), include_adult: 'false' }, mapTmdbPage))!,
     detail: (id) =>

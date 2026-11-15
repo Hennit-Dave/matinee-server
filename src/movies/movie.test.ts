@@ -12,6 +12,7 @@ import {
   MovieSchema,
   MoviesPageSchema,
   NowPlayingQuerySchema,
+  PopularQuerySchema,
   SearchQuerySchema,
   normaliseQuery,
 } from './movie.js';
@@ -177,5 +178,14 @@ test('DiscoverQuerySchema validates genreId and defaults/bounds page', () => {
     { genreId: '28', page: String(MAX_PAGE + 1) },
   ]) {
     assert.throws(() => DiscoverQuerySchema.parse(bad), `query=${JSON.stringify(bad)} must be rejected`);
+  }
+});
+
+test('PopularQuerySchema defaults page to 1 and enforces 1..MAX_PAGE', () => {
+  assert.deepEqual(PopularQuerySchema.parse({}), { page: 1 });
+  assert.deepEqual(PopularQuerySchema.parse({ page: '3' }), { page: 3 });
+  assert.deepEqual(PopularQuerySchema.parse({ page: String(MAX_PAGE) }), { page: MAX_PAGE });
+  for (const bad of [{ page: '0' }, { page: String(MAX_PAGE + 1) }, { page: 'abc' }, { extra: '1' }]) {
+    assert.throws(() => PopularQuerySchema.parse(bad));
   }
 });

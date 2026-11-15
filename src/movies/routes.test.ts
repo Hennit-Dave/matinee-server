@@ -67,6 +67,7 @@ const SHOWTIMES: MovieShowtimesResponse = {
 async function boot(
   handler: {
     nowPlaying?: () => Promise<MoviesResult>;
+    popular?: (page: number) => Promise<MoviesResult>;
     search?: () => Promise<MoviesResult>;
     detail?: (id: number) => Promise<MovieDetailResult>;
     genres?: () => Promise<GenresResult>;
@@ -80,6 +81,10 @@ async function boot(
     async nowPlaying(page) {
       calls.push({ method: 'nowPlaying', args: [page] });
       return handler.nowPlaying ? handler.nowPlaying() : { page: PAGE, cache: 'hit' };
+    },
+    async popular(page) {
+      calls.push({ method: 'popular', args: [page] });
+      return handler.popular ? handler.popular(page) : { page: PAGE, cache: 'hit' };
     },
     async search(query, page) {
       calls.push({ method: 'search', args: [query, page] });
@@ -395,5 +400,48 @@ test('GET /movies/discover propagates 503 when upstream fails with no cache', as
     assert.equal(body.error.code, 'upstream_unavailable');
   } finally {
     await app.close();
+  }
+});
+
+test('GET /movies/popular validates page, sets X-Cache, is not captured by /:id, and propagates 503', async () => {
+  const app = await boot({
+    popular: async (page) => ({ page: { ...PAGE, page }, cache: 'miss' }),
+  });
+  try {
+    const def = await fetch(`${app.base}/movies/popular`);
+    assert.equal(def.status, 200);
+    assert.equal(def.headers.get('x-cache'), 'MISS');
+    assert.equal(((await def.json()) as MoviesPage).page, 1);
+
+    const paged = await fetch(`${app.base}/movies/popular?page=3`);
+    assert.equal(paged.status, 200);
+    assert.equal(((await paged.json()) as MoviesPage).page, 3);
+    assert.deepEqual(app.calls, [
+      { method: 'popular', args: [1] },
+      { method: 'popular', args: [3] },
+    ]);
+
+    for (const badPath of ['/movies/popular?page=0', '/movies/popular?page=501', '/movies/popular?extra=1']) {
+      const bad = await fetch(`${app.base}${badPath}`);
+      await bad.text();
+      assert.equal(bad.status, 400, `${badPath} should return 400`);
+    }
+    assert.equal(app.calls.filter((c) => c.method === 'detail').length, 0);
+  } finally {
+    await app.close();
+  }
+
+  const down = await boot({
+    popular: async () => {
+      throw new ApiError('upstream_unavailable');
+    },
+  });
+  try {
+    const res = await fetch(`${down.base}/movies/popular`);
+    assert.equal(res.status, 503);
+    const body = (await res.json()) as { error: { code: string } };
+    assert.equal(body.error.code, 'upstream_unavailable');
+  } finally {
+    await down.close();
   }
 });

@@ -23,6 +23,9 @@ const noopMovies: MovieService = {
   nowPlaying: async () => {
     throw new Error('not used');
   },
+  popular: async () => {
+    throw new Error('not used');
+  },
   search: async () => {
     throw new Error('not used');
   },
