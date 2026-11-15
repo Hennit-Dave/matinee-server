@@ -65,7 +65,16 @@ function setup() {
   };
 
   // A fake TMDB with a "down" switch and a call counter.
-  const tmdb = { down: false, missingId: 404404, nowPlayingCalls: 0, searchCalls: 0, detailCalls: 0, label: 'v1' };
+  const tmdb = {
+    down: false,
+    missingId: 404404,
+    nowPlayingCalls: 0,
+    searchCalls: 0,
+    detailCalls: 0,
+    genresCalls: 0,
+    discoverCalls: 0,
+    label: 'v1',
+  };
   const source: MovieSource = {
     async nowPlaying(page) {
       tmdb.nowPlayingCalls++;
@@ -82,6 +91,16 @@ function setup() {
       if (tmdb.down) throw new MovieSourceError('upstream_error', 503);
       if (id === tmdb.missingId) return null;
       return detailOf(id, `detail ${tmdb.label}`);
+    },
+    async genres() {
+      tmdb.genresCalls++;
+      if (tmdb.down) throw new MovieSourceError('upstream_error', 503);
+      return { genres: [{ id: 28, name: `Action ${tmdb.label}` }] };
+    },
+    async discover(_genreId, page) {
+      tmdb.discoverCalls++;
+      if (tmdb.down) throw new MovieSourceError('upstream_error', 503);
+      return pageOf(`discover ${tmdb.label}`, page);
     },
   };
 
@@ -222,6 +241,12 @@ test('an unexpected error (a bug, not an outage) is not disguised as "TMDB is do
       async detail() {
         throw new TypeError('bug in the mapper');
       },
+      async genres() {
+        throw new TypeError('bug in the mapper');
+      },
+      async discover() {
+        throw new TypeError('bug in the mapper');
+      },
     },
     cache: createMovieCache({ store: { get: async () => null, set: async () => {} }, logger }),
     logger,
@@ -265,6 +290,66 @@ test('detail(id): MISS -> HIT, TTL is 24h + 7d, 404 throws ApiError not_found, T
     assert.ok(err instanceof ApiError);
     assert.equal(err.code, 'upstream_unavailable');
     assert.equal(err.status, 503);
+    return true;
+  });
+});
+
+test('genres(): MISS -> HIT -> stale serve -> 503 when empty and TMDB down', async () => {
+  const t = setup();
+
+  const first = await t.service.genres();
+  assert.equal(first.cache, 'miss');
+  assert.deepEqual(first.genres, { genres: [{ id: 28, name: 'Action v1' }] });
+  assert.equal(t.tmdb.genresCalls, 1);
+
+  t.tmdb.label = 'v2';
+  const hit = await t.service.genres();
+  assert.equal(hit.cache, 'hit');
+  assert.deepEqual(hit.genres, { genres: [{ id: 28, name: 'Action v1' }] });
+  assert.equal(t.tmdb.genresCalls, 1);
+
+  t.clock.now += (7 * 24 * 3600 + 60) * 1000;
+  t.tmdb.down = true;
+  const stale = await t.service.genres();
+  assert.equal(stale.cache, 'stale');
+  assert.deepEqual(stale.genres, { genres: [{ id: 28, name: 'Action v1' }] });
+
+  const empty = setup();
+  empty.tmdb.down = true;
+  await assert.rejects(empty.service.genres(), (err: unknown) => {
+    assert.ok(err instanceof ApiError);
+    assert.equal(err.status, 503);
+    assert.equal(err.code, 'upstream_unavailable');
+    return true;
+  });
+});
+
+test('discover(): MISS -> HIT -> stale serve -> 503 when empty and TMDB down', async () => {
+  const t = setup();
+
+  const first = await t.service.discover(28, 1);
+  assert.equal(first.cache, 'miss');
+  assert.equal(first.page.movies[0]?.title, 'discover v1');
+  assert.equal(t.tmdb.discoverCalls, 1);
+
+  t.tmdb.label = 'v2';
+  const hit = await t.service.discover(28, 1);
+  assert.equal(hit.cache, 'hit');
+  assert.equal(hit.page.movies[0]?.title, 'discover v1');
+  assert.equal(t.tmdb.discoverCalls, 1);
+
+  t.clock.now += (3 * 3600 + 60) * 1000;
+  t.tmdb.down = true;
+  const stale = await t.service.discover(28, 1);
+  assert.equal(stale.cache, 'stale');
+  assert.equal(stale.page.movies[0]?.title, 'discover v1');
+
+  const empty = setup();
+  empty.tmdb.down = true;
+  await assert.rejects(empty.service.discover(28, 1), (err: unknown) => {
+    assert.ok(err instanceof ApiError);
+    assert.equal(err.status, 503);
+    assert.equal(err.code, 'upstream_unavailable');
     return true;
   });
 });

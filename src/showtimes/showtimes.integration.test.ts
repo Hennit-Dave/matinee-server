@@ -29,6 +29,12 @@ const noopMovies: MovieService = {
   detail: async () => {
     throw new Error('not used');
   },
+  genres: async () => {
+    throw new Error('not used');
+  },
+  discover: async () => {
+    throw new Error('not used');
+  },
 };
 
 test('seedDatabase is idempotent and GET /movies/:id/showtimes reads from Postgres via replica', { skip }, async () => {

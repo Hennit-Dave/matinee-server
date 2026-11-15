@@ -68,6 +68,17 @@ export const MovieDetailSchema = z.strictObject({
 });
 export type MovieDetail = z.infer<typeof MovieDetailSchema>;
 
+export const GenreSchema = z.strictObject({
+  id: z.number().int().positive(),
+  name: z.string().min(1),
+});
+export type Genre = z.infer<typeof GenreSchema>;
+
+export const GenresResponseSchema = z.strictObject({
+  genres: z.array(GenreSchema),
+});
+export type GenresResponse = z.infer<typeof GenresResponseSchema>;
+
 // ---- Request schemas (Zod on every request, AGENTS.md section 4) -----------------------------
 
 /** TMDB serves at most 500 pages per list; asking beyond that is a guaranteed upstream error. */
@@ -108,6 +119,15 @@ export const MovieIdParamsSchema = z.strictObject({
     .pipe(z.number().int().min(1).max(MAX_MOVIE_ID)),
 });
 
+export const DiscoverQuerySchema = z.strictObject({
+  genreId: z
+    .string()
+    .regex(/^\d+$/)
+    .transform(Number)
+    .pipe(z.number().int().min(1).max(MAX_MOVIE_ID)),
+  page: pageParam,
+});
+
 // ---- The seam between the service and whatever supplies movies -------------------------------
 
 /** What the rest of the server needs from a movie provider. TMDB is one implementation. */
@@ -117,6 +137,8 @@ export interface MovieSource {
   search(query: string, page: number): Promise<MoviesPage>;
   /** Full detail for one movie, or null when the provider reports it does not exist (404). */
   detail(id: number): Promise<MovieDetail | null>;
+  genres(): Promise<GenresResponse>;
+  discover(genreId: number, page: number): Promise<MoviesPage>;
 }
 
 /**

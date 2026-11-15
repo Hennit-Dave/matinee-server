@@ -4,7 +4,7 @@ import { createApp } from '../api/app.js';
 import { ApiError } from '../http/errors.js';
 import { createLogger } from '../http/logger.js';
 import { MAX_QUERY_LENGTH, type MovieDetail, type MoviesPage } from './movie.js';
-import type { MovieDetailResult, MovieService, MoviesResult } from './service.js';
+import type { GenresResult, MovieDetailResult, MovieService, MoviesResult } from './service.js';
 import type { MovieShowtimesResponse, ShowtimeService } from '../showtimes/showtime.js';
 
 const PAGE: MoviesPage = {
@@ -69,6 +69,8 @@ async function boot(
     nowPlaying?: () => Promise<MoviesResult>;
     search?: () => Promise<MoviesResult>;
     detail?: (id: number) => Promise<MovieDetailResult>;
+    genres?: () => Promise<GenresResult>;
+    discover?: (genreId: number, page: number) => Promise<MoviesResult>;
     showtimes?: (id: number) => Promise<MovieShowtimesResponse>;
   } = {},
 ) {
@@ -86,6 +88,14 @@ async function boot(
     async detail(id) {
       calls.push({ method: 'detail', args: [id] });
       return handler.detail ? handler.detail(id) : { movie: DETAIL, cache: 'hit' };
+    },
+    async genres() {
+      calls.push({ method: 'genres', args: [] });
+      return handler.genres ? handler.genres() : { genres: { genres: [{ id: 28, name: 'Action' }] }, cache: 'hit' };
+    },
+    async discover(genreId, page) {
+      calls.push({ method: 'discover', args: [genreId, page] });
+      return handler.discover ? handler.discover(genreId, page) : { page: PAGE, cache: 'miss' };
     },
   };
   const showtimes: ShowtimeService = {
@@ -306,5 +316,84 @@ test('GET /movies/:id/showtimes returns grouped showtimes (and 200 empty list wh
     assert.deepEqual(await res.json(), { movieId: 999, cinemas: [] });
   } finally {
     await emptyApp.close();
+  }
+});
+
+test('GET /genres returns 200 with genres and X-Cache header', async () => {
+  const app = await boot({
+    genres: async () => ({ genres: { genres: [{ id: 28, name: 'Action' }, { id: 18, name: 'Drama' }] }, cache: 'miss' }),
+  });
+  try {
+    const res = await fetch(`${app.base}/genres`);
+    assert.equal(res.status, 200);
+    assert.equal(res.headers.get('x-cache'), 'MISS');
+    assert.deepEqual(await res.json(), { genres: [{ id: 28, name: 'Action' }, { id: 18, name: 'Drama' }] });
+    assert.deepEqual(app.calls, [{ method: 'genres', args: [] }]);
+  } finally {
+    await app.close();
+  }
+});
+
+test('GET /genres propagates 503 when upstream fails with no cache', async () => {
+  const app = await boot({
+    genres: async () => {
+      throw new ApiError('upstream_unavailable');
+    },
+  });
+  try {
+    const res = await fetch(`${app.base}/genres`);
+    assert.equal(res.status, 503);
+    const body = (await res.json()) as { error: { code: string } };
+    assert.equal(body.error.code, 'upstream_unavailable');
+  } finally {
+    await app.close();
+  }
+});
+
+test('GET /movies/discover validates genreId and page and is not captured by /:id', async () => {
+  const app = await boot({
+    discover: async (_genreId, page) => ({
+      page: { ...PAGE, page },
+      cache: 'hit',
+    }),
+  });
+  try {
+    const ok = await fetch(`${app.base}/movies/discover?genreId=28&page=2`);
+    assert.equal(ok.status, 200);
+    assert.equal(ok.headers.get('x-cache'), 'HIT');
+    assert.equal(((await ok.json()) as MoviesPage).page, 2);
+    assert.deepEqual(app.calls, [{ method: 'discover', args: [28, 2] }]);
+
+    for (const badPath of [
+      '/movies/discover',
+      '/movies/discover?genreId=abc',
+      '/movies/discover?genreId=0',
+      '/movies/discover?genreId=28&page=0',
+      '/movies/discover?genreId=28&page=501',
+    ]) {
+      const bad = await fetch(`${app.base}${badPath}`);
+      await bad.text();
+      assert.equal(bad.status, 400, `${badPath} should return 400`);
+    }
+    // None of the invalid discover requests should have fallen through to detail().
+    assert.equal(app.calls.filter((c) => c.method === 'detail').length, 0);
+  } finally {
+    await app.close();
+  }
+});
+
+test('GET /movies/discover propagates 503 when upstream fails with no cache', async () => {
+  const app = await boot({
+    discover: async () => {
+      throw new ApiError('upstream_unavailable');
+    },
+  });
+  try {
+    const res = await fetch(`${app.base}/movies/discover?genreId=28`);
+    assert.equal(res.status, 503);
+    const body = (await res.json()) as { error: { code: string } };
+    assert.equal(body.error.code, 'upstream_unavailable');
+  } finally {
+    await app.close();
   }
 });

@@ -1,7 +1,14 @@
 import type { Redis } from 'ioredis';
 import { z } from 'zod';
 import type { Logger } from '../http/logger.js';
-import { MovieDetailSchema, MoviesPageSchema, type MovieDetail, type MoviesPage } from './movie.js';
+import {
+  GenresResponseSchema,
+  MovieDetailSchema,
+  MoviesPageSchema,
+  type GenresResponse,
+  type MovieDetail,
+  type MoviesPage,
+} from './movie.js';
 
 /**
  * Cache-aside storage for movie pages. It stores OUR mapped MoviesPage, never TMDB's raw
@@ -45,6 +52,7 @@ export function createRedisStore(redis: Pick<Redis, 'get' | 'set' | 'status'>): 
 
 const EntrySchema = z.strictObject({ freshUntil: z.number(), page: MoviesPageSchema });
 const DetailEntrySchema = z.strictObject({ freshUntil: z.number(), movie: MovieDetailSchema });
+const GenresEntrySchema = z.strictObject({ freshUntil: z.number(), genres: GenresResponseSchema });
 
 export interface CacheEntry {
   page: MoviesPage;
@@ -58,6 +66,12 @@ export interface DetailCacheEntry {
   freshUntil: number;
 }
 
+export interface GenresCacheEntry {
+  genres: GenresResponse;
+  /** Epoch ms. Before this the entry is fresh; after it, stale (usable only as a fallback). */
+  freshUntil: number;
+}
+
 export interface MovieCache {
   /** The entry, or null on a miss, a corrupt/old-shape entry, or an unreachable Redis. Never throws. */
   read(key: string): Promise<CacheEntry | null>;
@@ -67,6 +81,10 @@ export interface MovieCache {
   readDetail(key: string): Promise<DetailCacheEntry | null>;
   /** Best effort. Never throws. */
   writeDetail(key: string, movie: MovieDetail, freshTtlSeconds: number, staleGraceSeconds: number): Promise<void>;
+  /** The genres entry, or null on a miss, a corrupt/old-shape entry, or an unreachable Redis. Never throws. */
+  readGenres(key: string): Promise<GenresCacheEntry | null>;
+  /** Best effort. Never throws. */
+  writeGenres(key: string, genres: GenresResponse, freshTtlSeconds: number, staleGraceSeconds: number): Promise<void>;
 }
 
 async function withTimeout<T>(promise: Promise<T>): Promise<T> {
@@ -120,5 +138,8 @@ export function createMovieCache(deps: { store: CacheStore; logger: Logger; now?
     readDetail: (key) => readWithSchema(key, DetailEntrySchema),
     writeDetail: (key, movie, freshTtlSeconds, staleGraceSeconds) =>
       writeEntry(key, { movie, freshUntil: now() + freshTtlSeconds * 1000 }, freshTtlSeconds, staleGraceSeconds),
+    readGenres: (key) => readWithSchema(key, GenresEntrySchema),
+    writeGenres: (key, genres, freshTtlSeconds, staleGraceSeconds) =>
+      writeEntry(key, { genres, freshUntil: now() + freshTtlSeconds * 1000 }, freshTtlSeconds, staleGraceSeconds),
   };
 }
