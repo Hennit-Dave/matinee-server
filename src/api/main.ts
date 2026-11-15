@@ -4,6 +4,7 @@ import { createRedisClient } from '../jobs/connection.js';
 import { createMovieCache, createRedisStore } from '../movies/cache.js';
 import { createMovieService } from '../movies/service.js';
 import { createTmdbMovieSource } from '../movies/tmdb.js';
+import { createShowtimeService } from '../showtimes/service.js';
 import { createApp } from './app.js';
 
 // Local-development default only; a host injects its own PORT.
@@ -53,8 +54,9 @@ const movies = createMovieService({
   cache: createMovieCache({ store: createRedisStore(redis), logger }),
   logger,
 });
+const showtimes = createShowtimeService(db);
 
-const app = createApp({ logger, db, redis, movies });
+const app = createApp({ logger, db, redis, movies, showtimes });
 
 const server = app.listen(port, () => {
   logger.info('api_listening', { port });

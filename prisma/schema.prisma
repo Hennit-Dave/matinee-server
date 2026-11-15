@@ -1,9 +1,6 @@
 // Matinee schema. One logical database (no sharding, ADR 0005) — a primary and a
 // read replica, both reached through pooled (-pooler) connection strings built in code
-// (src/db/clients.ts), not from a `url` here.
-//
-// No models yet: slice 0 only needs a client that can run a trivial query for /health.
-// Real models (movies, showtimes, seats, bookings) land with Requirement 1 and onward.
+// (src/db/clients.ts). Migrations use DATABASE_DIRECT_URL via prisma.config.ts (ADR 0010).
 
 generator client {
   provider = "prisma-client"
@@ -12,4 +9,43 @@ generator client {
 
 datasource db {
   provider = "postgresql"
+}
+
+model Cinema {
+  id        String   @id
+  name      String
+  address   String
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  screens   Screen[]
+
+  @@map("cinemas")
+}
+
+model Screen {
+  id         String     @id
+  cinemaId   String     @map("cinema_id")
+  name       String
+  totalSeats Int        @map("total_seats")
+  createdAt  DateTime   @default(now()) @map("created_at") @db.Timestamptz(3)
+  cinema     Cinema     @relation(fields: [cinemaId], references: [id], onDelete: Cascade)
+  showtimes  Showtime[]
+
+  @@unique([cinemaId, name])
+  @@map("screens")
+}
+
+model Showtime {
+  id         String   @id @default(uuid()) @db.Uuid
+  /** TMDB movie id — plain integer with no FK because movies live in TMDB, not Postgres (ADR 0010). */
+  movieId    Int      @map("movie_id")
+  screenId   String   @map("screen_id")
+  startsAt   DateTime @map("starts_at") @db.Timestamptz(3)
+  /** Ticket price in minor units (whole integer cents, RULES A3). */
+  priceCents Int      @map("price_cents")
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  screen     Screen   @relation(fields: [screenId], references: [id], onDelete: Cascade)
+
+  @@unique([screenId, startsAt])
+  @@index([movieId, startsAt])
+  @@map("showtimes")
 }

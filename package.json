@@ -16,6 +16,8 @@
     "test": "node --env-file-if-exists=.env --import tsx --test \"src/**/*.test.ts\"",
     "test:integration": "node --env-file-if-exists=.env --import tsx --test --test-concurrency=1 \"src/**/*.integration.test.ts\"",
     "db:generate": "node ./node_modules/prisma/build/index.js generate",
+    "db:migrate": "prisma migrate deploy",
+    "db:seed": "tsx --env-file-if-exists=.env src/db/seed.ts",
     "prebuild": "npm run db:generate",
     "pretypecheck": "npm run db:generate",
     "pretest": "npm run db:generate",
