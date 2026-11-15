@@ -6,6 +6,7 @@ import {
   DiscoverQuerySchema,
   MovieIdParamsSchema,
   NowPlayingQuerySchema,
+  PopularQuerySchema,
   SearchQuerySchema,
 } from './movie.js';
 import type { CacheStatus, MovieService } from './service.js';
@@ -35,6 +36,12 @@ export function createMoviesRouter(service: MovieService, showtimes?: ShowtimeSe
   router.get('/now-playing', validateRequest({ query: NowPlayingQuerySchema }), async (req, res) => {
     const { query } = req.validated as { query: z.output<typeof NowPlayingQuerySchema> };
     const result = await service.nowPlaying(query.page);
+    sendWithCache(res, result.page, result.cache);
+  });
+
+  router.get('/popular', validateRequest({ query: PopularQuerySchema }), async (req, res) => {
+    const { query } = req.validated as { query: z.output<typeof PopularQuerySchema> };
+    const result = await service.popular(query.page);
     sendWithCache(res, result.page, result.cache);
   });
 

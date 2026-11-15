@@ -352,3 +352,13 @@ test('source.discover() hits /3/discover/movie with with_genres, popularity.desc
   assert.equal(call.url.searchParams.get('include_adult'), 'false');
   assert.equal(call.url.searchParams.get('page'), '2');
 });
+
+test('source.popular() hits /3/movie/popular with page and reuses mapTmdbPage', async () => {
+  const h = harness([ok]);
+  const page = await h.source.popular(2);
+  assert.equal(page.movies.length, 4);
+  const call = h.calls[0];
+  assert.ok(call);
+  assert.equal(call.url.pathname, '/3/movie/popular');
+  assert.equal(call.url.searchParams.get('page'), '2');
+});

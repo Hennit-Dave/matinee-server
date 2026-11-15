@@ -40,6 +40,9 @@ export const GENRES_STALE_GRACE_SECONDS = 30 * 24 * 60 * 60;
 /** Genre discovery matches now-playing cadence: fresh 3 hours, stale grace 24 hours. */
 export const DISCOVER_FRESH_TTL_SECONDS = 3 * 60 * 60;
 export const DISCOVER_STALE_GRACE_SECONDS = 24 * 60 * 60;
+/** Popular matches now-playing cadence: fresh 3 hours, stale grace 24 hours. */
+export const POPULAR_FRESH_TTL_SECONDS = 3 * 60 * 60;
+export const POPULAR_STALE_GRACE_SECONDS = 24 * 60 * 60;
 
 /** Bump when the cached value's meaning changes. (A changed Movie SHAPE is already caught: cache.ts re-validates on read.) */
 const KEY_VERSION = 'v1';
@@ -51,6 +54,7 @@ const KEY_VERSION = 'v1';
  * The query is URL-encoded so it can never contain ":" and run into the ":page:" part.
  */
 export const nowPlayingKey = (page: number) => `movies:${KEY_VERSION}:now-playing:page:${page}`;
+export const popularKey = (page: number) => `movies:${KEY_VERSION}:popular:page:${page}`;
 export const searchKey = (normalisedQuery: string, page: number) =>
   `movies:${KEY_VERSION}:search:${encodeURIComponent(normalisedQuery)}:page:${page}`;
 export const detailKey = (id: number) => `movies:${KEY_VERSION}:detail:${id}`;
@@ -78,6 +82,7 @@ export interface GenresResult {
 
 export interface MovieService {
   nowPlaying(page: number): Promise<MoviesResult>;
+  popular(page: number): Promise<MoviesResult>;
   /** `query` must already be normalised (see normaliseQuery). */
   search(query: string, page: number): Promise<MoviesResult>;
   detail(id: number): Promise<MovieDetailResult>;
@@ -157,6 +162,17 @@ export function createMovieService(deps: {
         read: readPage,
         write: cache.write,
         load: () => source.nowPlaying(page),
+      });
+      return { page: res.value, cache: res.cache };
+    },
+    popular: async (page) => {
+      const res = await cacheAside({
+        key: popularKey(page),
+        freshTtl: POPULAR_FRESH_TTL_SECONDS,
+        staleGrace: POPULAR_STALE_GRACE_SECONDS,
+        read: readPage,
+        write: cache.write,
+        load: () => source.popular(page),
       });
       return { page: res.value, cache: res.cache };
     },
