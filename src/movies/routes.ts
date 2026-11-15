@@ -2,12 +2,15 @@ import { Router, type Response } from 'express';
 import type { z } from 'zod';
 import { recordRouteBase } from '../http/logger.js';
 import { validateRequest } from '../http/validate.js';
-import { NowPlayingQuerySchema, SearchQuerySchema } from './movie.js';
-import type { MoviesResult, MovieService } from './service.js';
+import { MovieIdParamsSchema, NowPlayingQuerySchema, SearchQuerySchema } from './movie.js';
+import type { CacheStatus, MovieService } from './service.js';
 
 /**
- * The only way the app gets movie data (RULES D1.2). Mounted at /movies. Query params are
- * validated with Zod before anything runs; handlers read only `req.validated`.
+ * The only way the app gets movie data (RULES D1.2). Mounted at /movies. Query and route params
+ * are validated with Zod before anything runs; handlers read only `req.validated`.
+ *
+ * Specific routes (/now-playing, /search) are registered BEFORE /:id so Express never matches
+ * them as a movie id.
  */
 export function createMoviesRouter(service: MovieService): Router {
   const router = Router();
@@ -15,20 +18,28 @@ export function createMoviesRouter(service: MovieService): Router {
 
   // Tells the caller (and the request log) where the data came from: HIT | MISS | STALE.
   // Informational only, not part of the Movie contract.
-  function send(res: Response, result: MoviesResult) {
-    res.locals.cache = result.cache;
-    res.setHeader('X-Cache', result.cache.toUpperCase());
-    res.json(result.page);
+  function send(res: Response, payload: unknown, cache: CacheStatus) {
+    res.locals.cache = cache;
+    res.setHeader('X-Cache', cache.toUpperCase());
+    res.json(payload);
   }
 
   router.get('/now-playing', validateRequest({ query: NowPlayingQuerySchema }), async (req, res) => {
     const { query } = req.validated as { query: z.output<typeof NowPlayingQuerySchema> };
-    send(res, await service.nowPlaying(query.page));
+    const result = await service.nowPlaying(query.page);
+    send(res, result.page, result.cache);
   });
 
   router.get('/search', validateRequest({ query: SearchQuerySchema }), async (req, res) => {
     const { query } = req.validated as { query: z.output<typeof SearchQuerySchema> };
-    send(res, await service.search(query.q, query.page));
+    const result = await service.search(query.q, query.page);
+    send(res, result.page, result.cache);
+  });
+
+  router.get('/:id', validateRequest({ params: MovieIdParamsSchema }), async (req, res) => {
+    const { params } = req.validated as { params: z.output<typeof MovieIdParamsSchema> };
+    const result = await service.detail(params.id);
+    send(res, result.movie, result.cache);
   });
 
   return router;

@@ -3,13 +3,16 @@ import assert from 'node:assert/strict';
 import { ApiError } from '../http/errors.js';
 import { createLogger } from '../http/logger.js';
 import { createMovieCache, type CacheStore } from './cache.js';
-import { MovieSourceError, type MoviesPage, type MovieSource } from './movie.js';
+import { MovieSourceError, type MovieDetail, type MoviesPage, type MovieSource } from './movie.js';
 import {
+  DETAIL_FRESH_TTL_SECONDS,
+  DETAIL_STALE_GRACE_SECONDS,
   NOW_PLAYING_FRESH_TTL_SECONDS,
   NOW_PLAYING_STALE_GRACE_SECONDS,
   SEARCH_FRESH_TTL_SECONDS,
   SEARCH_STALE_GRACE_SECONDS,
   createMovieService,
+  detailKey,
   nowPlayingKey,
   searchKey,
 } from './service.js';
@@ -19,6 +22,20 @@ const pageOf = (label: string, page = 1): MoviesPage => ({
   page,
   totalPages: 3,
   totalResults: 50,
+});
+
+const detailOf = (id: number, label: string): MovieDetail => ({
+  id,
+  title: label,
+  overview: 'Full overview.',
+  posterUrl: null,
+  backdropUrl: null,
+  year: 2026,
+  releaseDate: '2026-11-07',
+  runtimeMinutes: 120,
+  genres: ['Drama'],
+  rating: 7.5,
+  tagline: null,
 });
 
 function setup() {
@@ -44,7 +61,7 @@ function setup() {
   };
 
   // A fake TMDB with a "down" switch and a call counter.
-  const tmdb = { down: false, nowPlayingCalls: 0, searchCalls: 0, label: 'v1' };
+  const tmdb = { down: false, missingId: 404404, nowPlayingCalls: 0, searchCalls: 0, detailCalls: 0, label: 'v1' };
   const source: MovieSource = {
     async nowPlaying(page) {
       tmdb.nowPlayingCalls++;
@@ -55,6 +72,12 @@ function setup() {
       tmdb.searchCalls++;
       if (tmdb.down) throw new MovieSourceError('upstream_error', 503);
       return pageOf(`search ${query} ${tmdb.label}`, page);
+    },
+    async detail(id) {
+      tmdb.detailCalls++;
+      if (tmdb.down) throw new MovieSourceError('upstream_error', 503);
+      if (id === tmdb.missingId) return null;
+      return detailOf(id, `detail ${tmdb.label}`);
     },
   };
 
@@ -192,9 +215,52 @@ test('an unexpected error (a bug, not an outage) is not disguised as "TMDB is do
       async search() {
         throw new TypeError('bug in the mapper');
       },
+      async detail() {
+        throw new TypeError('bug in the mapper');
+      },
     },
     cache: createMovieCache({ store: { get: async () => null, set: async () => {} }, logger }),
     logger,
   });
   await assert.rejects(service.nowPlaying(1), TypeError);
+});
+
+test('detail(id): MISS -> HIT, TTL is 24h + 7d, 404 throws ApiError not_found, TMDB down serves stale or 503', async () => {
+  const t = setup();
+
+  const first = await t.service.detail(7);
+  assert.equal(first.cache, 'miss');
+  assert.equal(first.movie.title, 'detail v1');
+  assert.equal(t.tmdb.detailCalls, 1);
+  assert.equal(
+    t.writes.find((w) => w.key === detailKey(7))?.ttlSeconds,
+    DETAIL_FRESH_TTL_SECONDS + DETAIL_STALE_GRACE_SECONDS,
+  );
+
+  t.tmdb.label = 'v2';
+  const hit = await t.service.detail(7);
+  assert.equal(hit.cache, 'hit');
+  assert.equal(hit.movie.title, 'detail v1');
+  assert.equal(t.tmdb.detailCalls, 1);
+
+  await assert.rejects(t.service.detail(t.tmdb.missingId), (err: unknown) => {
+    assert.ok(err instanceof ApiError);
+    assert.equal(err.code, 'not_found');
+    assert.equal(err.status, 404);
+    return true;
+  });
+  assert.ok(!t.data.has(detailKey(t.tmdb.missingId)), '404s are not cached');
+
+  t.clock.now += (DETAIL_FRESH_TTL_SECONDS + 60) * 1000;
+  t.tmdb.down = true;
+  const stale = await t.service.detail(7);
+  assert.equal(stale.cache, 'stale');
+  assert.equal(stale.movie.title, 'detail v1');
+
+  await assert.rejects(t.service.detail(8), (err: unknown) => {
+    assert.ok(err instanceof ApiError);
+    assert.equal(err.code, 'upstream_unavailable');
+    assert.equal(err.status, 503);
+    return true;
+  });
 });

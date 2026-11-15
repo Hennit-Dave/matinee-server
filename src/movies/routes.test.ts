@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import { createApp } from '../api/app.js';
 import { ApiError } from '../http/errors.js';
 import { createLogger } from '../http/logger.js';
-import { MAX_QUERY_LENGTH, type MoviesPage } from './movie.js';
-import type { MovieService, MoviesResult } from './service.js';
+import { MAX_QUERY_LENGTH, type MovieDetail, type MoviesPage } from './movie.js';
+import type { MovieDetailResult, MovieService, MoviesResult } from './service.js';
 
 const PAGE: MoviesPage = {
   movies: [
@@ -15,8 +15,28 @@ const PAGE: MoviesPage = {
   totalResults: 1,
 };
 
+const DETAIL: MovieDetail = {
+  id: 7,
+  title: 'Dune',
+  overview: 'A noble family becomes embroiled in a war for control over the galaxy’s most valuable asset.',
+  posterUrl: 'https://image.tmdb.org/t/p/w500/d.jpg',
+  backdropUrl: 'https://image.tmdb.org/t/p/w780/bd.jpg',
+  year: 2021,
+  releaseDate: '2021-10-22',
+  runtimeMinutes: 155,
+  genres: ['Science Fiction', 'Adventure'],
+  rating: 7.8,
+  tagline: 'Beyond fear, destiny awaits.',
+};
+
 /** Boots the REAL app (middleware, validation, error handler, logging) around a fake MovieService. */
-async function boot(handler: { nowPlaying?: () => Promise<MoviesResult>; search?: () => Promise<MoviesResult> } = {}) {
+async function boot(
+  handler: {
+    nowPlaying?: () => Promise<MoviesResult>;
+    search?: () => Promise<MoviesResult>;
+    detail?: (id: number) => Promise<MovieDetailResult>;
+  } = {},
+) {
   const calls: Array<{ method: string; args: unknown[] }> = [];
   const logs: string[] = [];
   const service: MovieService = {
@@ -27,6 +47,10 @@ async function boot(handler: { nowPlaying?: () => Promise<MoviesResult>; search?
     async search(query, page) {
       calls.push({ method: 'search', args: [query, page] });
       return handler.search ? handler.search() : { page: PAGE, cache: 'miss' };
+    },
+    async detail(id) {
+      calls.push({ method: 'detail', args: [id] });
+      return handler.detail ? handler.detail(id) : { movie: DETAIL, cache: 'hit' };
     },
   };
   const server = createApp({
@@ -99,6 +123,10 @@ const BAD_REQUESTS = [
   `/movies/search?q=${'a'.repeat(MAX_QUERY_LENGTH + 1)}`,
   '/movies/search?q=dune&page=0',
   '/movies/search?q=dune&extra=1',
+  '/movies/0',
+  '/movies/-5',
+  '/movies/abc',
+  '/movies/7?foo=1',
 ];
 
 test('bad input returns the standard error shape (400 validation_failed) and never reaches the service', async () => {
@@ -163,5 +191,54 @@ test('the request log line carries the route template and where the data came fr
     assert.ok(!app.logs.join('\n').includes('privatequerytext'), 'the search text is never logged');
   } finally {
     await app.close();
+  }
+});
+
+test('GET /movies/:id returns MovieDetail, sets X-Cache, and logs /movies/:id template', async () => {
+  const app = await boot();
+  try {
+    const res = await fetch(`${app.base}/movies/7`);
+    assert.equal(res.status, 200);
+    assert.equal(res.headers.get('x-cache'), 'HIT');
+    assert.deepEqual(await res.json(), DETAIL);
+    assert.deepEqual(app.calls, [{ method: 'detail', args: [7] }]);
+
+    await waitForRequestLog(app.logs);
+    const line = JSON.parse(app.logs.find((l) => l.includes('"msg":"request"')) ?? '{}') as Record<string, unknown>;
+    assert.equal(line.route, '/movies/:id');
+    assert.equal(line.status, 200);
+    assert.equal(line.cache, 'hit');
+  } finally {
+    await app.close();
+  }
+});
+
+test('GET /movies/:id returns 404 not_found for unknown movie and 503 upstream_unavailable when uncached + TMDB down', async () => {
+  const notFoundApp = await boot({
+    detail: async () => {
+      throw new ApiError('not_found');
+    },
+  });
+  try {
+    const res = await fetch(`${notFoundApp.base}/movies/999999`);
+    assert.equal(res.status, 404);
+    const body = (await res.json()) as { error: { code: string; requestId: string } };
+    assert.equal(body.error.code, 'not_found');
+  } finally {
+    await notFoundApp.close();
+  }
+
+  const downApp = await boot({
+    detail: async () => {
+      throw new ApiError('upstream_unavailable', { reason: 'movie source: upstream_error' });
+    },
+  });
+  try {
+    const res = await fetch(`${downApp.base}/movies/7`);
+    assert.equal(res.status, 503);
+    const body = (await res.json()) as { error: { code: string; requestId: string } };
+    assert.equal(body.error.code, 'upstream_unavailable');
+  } finally {
+    await downApp.close();
   }
 });

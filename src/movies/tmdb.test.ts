@@ -2,8 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createLogger } from '../http/logger.js';
-import { MovieSourceError, MoviesPageSchema, OVERVIEW_MAX_LENGTH } from './movie.js';
-import { MAX_ATTEMPTS, RETRY_AFTER_CAP_MS, createTmdbMovieSource, mapTmdbPage } from './tmdb.js';
+import { MovieDetailSchema, MovieSourceError, MoviesPageSchema, OVERVIEW_MAX_LENGTH } from './movie.js';
+import { MAX_ATTEMPTS, RETRY_AFTER_CAP_MS, createTmdbMovieSource, mapTmdbMovieDetail, mapTmdbPage } from './tmdb.js';
 
 // A TMDB now_playing response in TMDB's documented shape, saved as a fixture. It is SYNTHETIC
 // (fictional titles, hand-written, not captured live: no agent touches the real token) and
@@ -12,6 +12,9 @@ import { MAX_ATTEMPTS, RETRY_AFTER_CAP_MS, createTmdbMovieSource, mapTmdbPage } 
 // assertions on the awkward cases are what matter.
 const fixture: unknown = JSON.parse(
   readFileSync(new URL('./fixtures/tmdb-now-playing.json', import.meta.url), 'utf8'),
+);
+const detailFixture: unknown = JSON.parse(
+  readFileSync(new URL('./fixtures/tmdb-movie-detail.json', import.meta.url), 'utf8'),
 );
 
 // ---- Mapper: saved TMDB fixture -> our Movie type --------------------------------------------
@@ -215,4 +218,69 @@ test('logs each failed attempt, and never the token, the response body or the se
   assert.ok(!all.includes(TOKEN), 'token must never be logged');
   assert.ok(!all.includes('upstream said no'), 'response bodies must never be logged');
   assert.ok(!all.includes('very private query'), 'search text must never be logged');
+});
+
+// ---- Detail mapper & client ------------------------------------------------------------------
+
+test('maps a TMDB movie detail into MovieDetail preserving full overview and rounding rating', () => {
+  const detail = mapTmdbMovieDetail(detailFixture);
+  assert.doesNotThrow(() => MovieDetailSchema.parse(detail));
+  assert.equal(detail.id, 900001);
+  assert.equal(detail.title, 'The Last Projectionist');
+  assert.ok(detail.overview !== null && detail.overview.length > OVERVIEW_MAX_LENGTH);
+  assert.ok(!/\n/.test(detail.overview), 'newlines collapsed to spaces');
+  assert.equal(detail.posterUrl, 'https://image.tmdb.org/t/p/w500/fxPosterOne.jpg');
+  assert.equal(detail.backdropUrl, 'https://image.tmdb.org/t/p/w780/fx-backdrop-detail.jpg');
+  assert.equal(detail.year, 2026);
+  assert.equal(detail.releaseDate, '2026-11-07');
+  assert.equal(detail.runtimeMinutes, 128);
+  assert.deepEqual(detail.genres, ['Drama', 'Thriller']);
+  assert.equal(detail.rating, 7.8);
+  assert.equal(detail.tagline, 'Every frame leaves a trace.');
+});
+
+test('maps sparse/unrated TMDB movie detail fields to null or empty array', () => {
+  const detail = mapTmdbMovieDetail({
+    id: 900002,
+    title: 'Unrated Film',
+    overview: '   ',
+    poster_path: null,
+    backdrop_path: null,
+    release_date: '',
+    runtime: 0,
+    genres: [],
+    vote_average: 0,
+    vote_count: 0,
+    tagline: '',
+  });
+  assert.deepEqual(detail, {
+    id: 900002,
+    title: 'Unrated Film',
+    overview: null,
+    posterUrl: null,
+    backdropUrl: null,
+    year: null,
+    releaseDate: null,
+    runtimeMinutes: null,
+    genres: [],
+    rating: null,
+    tagline: null,
+  });
+});
+
+test('detail(id) hits /3/movie/:id, returns null on 404 without retrying, and retries 503', async () => {
+  const okDetail = harness([() => Response.json(detailFixture)]);
+  const detail = await okDetail.source.detail(900001);
+  assert.equal(detail?.id, 900001);
+  assert.equal(okDetail.calls[0]?.url.pathname, '/3/movie/900001');
+
+  const notFound = harness([status(404)]);
+  const missing = await notFound.source.detail(999999);
+  assert.equal(missing, null);
+  assert.equal(notFound.calls.length, 1, '404 must not be retried');
+
+  const flaky = harness([status(503), () => Response.json(detailFixture)]);
+  const recovered = await flaky.source.detail(900001);
+  assert.equal(recovered?.id, 900001);
+  assert.equal(flaky.calls.length, 2);
 });

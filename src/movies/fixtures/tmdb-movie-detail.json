@@ -1,0 +1,24 @@
+{
+  "adult": false,
+  "backdrop_path": "/fx-backdrop-detail.jpg",
+  "budget": 42000000,
+  "genres": [
+    { "id": 18, "name": "Drama" },
+    { "id": 53, "name": "Thriller" }
+  ],
+  "id": 900001,
+  "original_language": "en",
+  "original_title": "The Last Projectionist",
+  "overview": "A retired projectionist guards the final reel of a lost film across a single stormy night in a seaside cinema.\n\nThis synopsis is intentionally longer than two hundred characters so the detail contract proves it preserves the full text rather than truncating it to a list teaser.",
+  "popularity": 412.337,
+  "poster_path": "/fxPosterOne.jpg",
+  "release_date": "2026-11-07",
+  "revenue": 0,
+  "runtime": 128,
+  "status": "Released",
+  "tagline": "Every frame leaves a trace.",
+  "title": "The Last Projectionist",
+  "video": false,
+  "vote_average": 7.84,
+  "vote_count": 1204
+}
