@@ -26,3 +26,7 @@ If TMDB is down, the server returns an older cached copy when one is available. 
 
 I learned that squash-merging creates a new commit ID, so Gitleaks exceptions tied to older commits can stop matching. In my case, it flagged two fake test tokens again. I verified they were dummy values, updated their exact exceptions, and confirmed the secret scan passed on `main`.
 
+## Movie detail + Showtimes
+
+The app asks my server for movie data so the TMDB key stays out of the mobile app, where someone could extract it. The server also caches responses and translates TMDB's fields in one place, keeping the app protected from changes to that format. TMDB supplies movie information, but our cinema schedules belong in our own database because we control the screens, times, and bookings. If a movie does not exist, the user sees a "not found" state (`404`). If TMDB is unavailable, we show an older cached copy when possible; otherwise, we return `503` and offer a retry. Checking Figma first revealed missing data such as age ratings, language, director, cast, and showtimes grouped by format, so I updated the server before building screens that needed those details.
+
