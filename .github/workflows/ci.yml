@@ -49,11 +49,19 @@ jobs:
       - run: npm test
 
       # No real replica in a CI container: TEST_DATABASE_READ_URL points at the same ci database as
-      # TEST_DATABASE_URL. That's enough to prove /health's replica check runs and the 503 path works
-      # (health.integration.test.ts); a real replica is only provable against Neon (docs/evidence/slice-0).
+      # TEST_DATABASE_URL. That's enough to prove /health's replica check runs, migrations apply, and
+      # showtime queries execute against real Postgres without touching Neon.
+      - name: Migrate ephemeral CI Postgres
+        env:
+          DATABASE_DIRECT_URL: postgresql://ci:ci@localhost:5432/ci
+        run: npx prisma migrate deploy
+
       - name: Integration test
         env:
           TEST_DATABASE_ALLOWED: 'true'
+          DATABASE_URL: postgresql://ci:ci@localhost:5432/ci
+          DATABASE_READ_URL: postgresql://ci:ci@localhost:5432/ci
+          DATABASE_DIRECT_URL: postgresql://ci:ci@localhost:5432/ci
           TEST_DATABASE_URL: postgresql://ci:ci@localhost:5432/ci
           TEST_DATABASE_READ_URL: postgresql://ci:ci@localhost:5432/ci
           TEST_REDIS_URL: redis://localhost:6379

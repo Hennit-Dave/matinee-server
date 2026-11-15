@@ -5,6 +5,7 @@ import { ApiError } from '../http/errors.js';
 import { createLogger } from '../http/logger.js';
 import { MAX_QUERY_LENGTH, type MovieDetail, type MoviesPage } from './movie.js';
 import type { MovieDetailResult, MovieService, MoviesResult } from './service.js';
+import type { MovieShowtimesResponse, ShowtimeService } from '../showtimes/showtime.js';
 
 const PAGE: MoviesPage = {
   movies: [
@@ -29,12 +30,41 @@ const DETAIL: MovieDetail = {
   tagline: 'Beyond fear, destiny awaits.',
 };
 
+const SHOWTIMES: MovieShowtimesResponse = {
+  movieId: 7,
+  cinemas: [
+    {
+      cinemaId: 'curzon-soho',
+      cinemaName: 'Curzon Soho',
+      cinemaAddress: '99 Shaftesbury Ave, London',
+      dates: [
+        {
+          date: '2026-11-15',
+          showtimes: [
+            {
+              id: '11111111-1111-4111-8111-111111111111',
+              startsAt: '2026-11-15T17:45:00.000Z',
+              time: '17:45',
+              screenId: 'curzon-soho-1',
+              screenName: 'Screen 1',
+              totalSeats: 120,
+              priceCents: 1550,
+              priceFormatted: '$15.50',
+            },
+          ],
+        },
+      ],
+    },
+  ],
+};
+
 /** Boots the REAL app (middleware, validation, error handler, logging) around a fake MovieService. */
 async function boot(
   handler: {
     nowPlaying?: () => Promise<MoviesResult>;
     search?: () => Promise<MoviesResult>;
     detail?: (id: number) => Promise<MovieDetailResult>;
+    showtimes?: (id: number) => Promise<MovieShowtimesResponse>;
   } = {},
 ) {
   const calls: Array<{ method: string; args: unknown[] }> = [];
@@ -53,11 +83,18 @@ async function boot(
       return handler.detail ? handler.detail(id) : { movie: DETAIL, cache: 'hit' };
     },
   };
+  const showtimes: ShowtimeService = {
+    async forMovie(id) {
+      calls.push({ method: 'showtimes', args: [id] });
+      return handler.showtimes ? handler.showtimes(id) : SHOWTIMES;
+    },
+  };
   const server = createApp({
     logger: createLogger((line) => logs.push(line)),
     db: {} as never,
     redis: {} as never,
     movies: service,
+    showtimes,
   }).listen(0);
   const address = server.address();
   if (!address || typeof address === 'string') throw new Error('no port');
@@ -127,6 +164,9 @@ const BAD_REQUESTS = [
   '/movies/-5',
   '/movies/abc',
   '/movies/7?foo=1',
+  '/movies/0/showtimes',
+  '/movies/abc/showtimes',
+  '/movies/7/showtimes?foo=1',
 ];
 
 test('bad input returns the standard error shape (400 validation_failed) and never reaches the service', async () => {
@@ -240,5 +280,26 @@ test('GET /movies/:id returns 404 not_found for unknown movie and 503 upstream_u
     assert.equal(body.error.code, 'upstream_unavailable');
   } finally {
     await downApp.close();
+  }
+});
+
+test('GET /movies/:id/showtimes returns grouped showtimes (and 200 empty list when none)', async () => {
+  const app = await boot();
+  try {
+    const res = await fetch(`${app.base}/movies/7/showtimes`);
+    assert.equal(res.status, 200);
+    assert.deepEqual(await res.json(), SHOWTIMES);
+    assert.deepEqual(app.calls, [{ method: 'showtimes', args: [7] }]);
+  } finally {
+    await app.close();
+  }
+
+  const emptyApp = await boot({ showtimes: async (id) => ({ movieId: id, cinemas: [] }) });
+  try {
+    const res = await fetch(`${emptyApp.base}/movies/999/showtimes`);
+    assert.equal(res.status, 200);
+    assert.deepEqual(await res.json(), { movieId: 999, cinemas: [] });
+  } finally {
+    await emptyApp.close();
   }
 });
