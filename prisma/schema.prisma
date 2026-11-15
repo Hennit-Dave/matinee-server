@@ -25,6 +25,7 @@ model Screen {
   id         String     @id
   cinemaId   String     @map("cinema_id")
   name       String
+  format     String     @default("Standard") @map("format")
   totalSeats Int        @map("total_seats")
   createdAt  DateTime   @default(now()) @map("created_at") @db.Timestamptz(3)
   cinema     Cinema     @relation(fields: [cinemaId], references: [id], onDelete: Cascade)

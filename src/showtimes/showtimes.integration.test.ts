@@ -53,6 +53,10 @@ test('seedDatabase is idempotent and GET /movies/:id/showtimes reads from Postgr
     const body = MovieShowtimesResponseSchema.parse(await res.json());
     assert.equal(body.movieId, FAKE_MOVIE_IDS[0]);
     assert.ok(body.cinemas.length > 0, 'seeded movie has showtimes');
+    const formats = new Set(
+      body.cinemas.flatMap((c) => c.dates.flatMap((d) => d.showtimes.map((s) => s.format))),
+    );
+    assert.ok(formats.has('Standard') || formats.has('IMAX') || formats.has('Dolby Atmos'));
 
     const emptyRes = await fetch(`http://127.0.0.1:${address.port}/movies/99999999/showtimes`);
     assert.equal(emptyRes.status, 200);

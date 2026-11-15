@@ -29,6 +29,7 @@ test('groupShowtimesByCinemaAndDate groups flat rows by cinema -> date -> showti
       screen: {
         id: 'curzon-soho-1',
         name: 'Screen 1',
+        format: 'Standard',
         totalSeats: 120,
         cinema: { id: 'curzon-soho', name: 'Curzon Soho', address: '99 Shaftesbury Ave, London' },
       },
@@ -40,6 +41,7 @@ test('groupShowtimesByCinemaAndDate groups flat rows by cinema -> date -> showti
       screen: {
         id: 'curzon-soho-2',
         name: 'Screen 2',
+        format: 'Standard',
         totalSeats: 84,
         cinema: { id: 'curzon-soho', name: 'Curzon Soho', address: '99 Shaftesbury Ave, London' },
       },
@@ -51,6 +53,7 @@ test('groupShowtimesByCinemaAndDate groups flat rows by cinema -> date -> showti
       screen: {
         id: 'bfi-southbank-imax',
         name: 'IMAX',
+        format: 'IMAX',
         totalSeats: 320,
         cinema: { id: 'bfi-southbank', name: 'BFI Southbank', address: 'Belvedere Rd, London' },
       },
@@ -63,6 +66,8 @@ test('groupShowtimesByCinemaAndDate groups flat rows by cinema -> date -> showti
   assert.equal(grouped.cinemas[0]?.dates[0]?.date, '2026-11-15');
   assert.equal(grouped.cinemas[0]?.dates[0]?.showtimes.length, 2);
   assert.equal(grouped.cinemas[0]?.dates[0]?.showtimes[0]?.time, '14:30');
+  assert.equal(grouped.cinemas[0]?.dates[0]?.showtimes[0]?.format, 'Standard');
   assert.equal(grouped.cinemas[0]?.dates[0]?.showtimes[0]?.priceFormatted, '$12.00');
+  assert.equal(grouped.cinemas[1]?.dates[0]?.showtimes[0]?.format, 'IMAX');
   assert.equal(grouped.cinemas[1]?.dates[0]?.showtimes[0]?.totalSeats, 320);
 });

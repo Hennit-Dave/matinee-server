@@ -47,6 +47,7 @@ const SHOWTIMES: MovieShowtimesResponse = {
               time: '17:45',
               screenId: 'curzon-soho-1',
               screenName: 'Screen 1',
+              format: 'Standard',
               totalSeats: 120,
               priceCents: 1550,
               priceFormatted: '$15.50',

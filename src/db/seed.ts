@@ -28,11 +28,12 @@ export async function seedDatabase(
   for (const screen of plan.screens) {
     await primary.screen.upsert({
       where: { id: screen.id },
-      update: { cinemaId: screen.cinemaId, name: screen.name, totalSeats: screen.totalSeats },
+      update: { cinemaId: screen.cinemaId, name: screen.name, format: screen.format, totalSeats: screen.totalSeats },
       create: {
         id: screen.id,
         cinemaId: screen.cinemaId,
         name: screen.name,
+        format: screen.format,
         totalSeats: screen.totalSeats,
       },
     });
