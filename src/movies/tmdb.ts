@@ -4,6 +4,7 @@ import {
   DETAIL_OVERVIEW_MAX_LENGTH,
   MovieSourceError,
   OVERVIEW_MAX_LENGTH,
+  type GenresResponse,
   type Movie,
   type MovieDetail,
   type MoviesPage,
@@ -34,6 +35,15 @@ const TmdbListSchema = z.object({
   results: z.array(TmdbMovieSchema),
   total_pages: z.number().int().nonnegative(),
   total_results: z.number().int().nonnegative(),
+});
+
+const TmdbGenresResponseSchema = z.object({
+  genres: z.array(
+    z.object({
+      id: z.number().int().positive(),
+      name: z.string(),
+    }),
+  ),
 });
 
 const TmdbMovieDetailSchema = TmdbMovieSchema.extend({
@@ -214,6 +224,16 @@ export function mapTmdbPage(body: unknown): MoviesPage {
   };
 }
 
+/** Parses a TMDB `/genre/movie/list` response into our GenresResponse. Throws ZodError if the shape is not what we expect. */
+export function mapTmdbGenres(body: unknown): GenresResponse {
+  const parsed = TmdbGenresResponseSchema.parse(body);
+  return {
+    genres: parsed.genres
+      .map((g) => ({ id: g.id, name: g.name.trim() }))
+      .filter((g) => g.name.length > 0),
+  };
+}
+
 /** Parses a TMDB `/movie/{id}` response into our MovieDetail. Throws ZodError if the shape is not what we expect. */
 export function mapTmdbMovieDetail(body: unknown): MovieDetail {
   const raw = TmdbMovieDetailSchema.parse(body);
@@ -375,6 +395,13 @@ export function createTmdbMovieSource(deps: TmdbDeps): MovieSource {
       requestTmdb(`/movie/${id}`, { append_to_response: 'credits,release_dates' }, mapTmdbMovieDetail, {
         allowNotFound: true,
       }),
+    genres: async () => (await requestTmdb('/genre/movie/list', {}, mapTmdbGenres))!,
+    discover: async (genreId, page) =>
+      (await requestTmdb(
+        '/discover/movie',
+        { with_genres: String(genreId), sort_by: 'popularity.desc', include_adult: 'false', page: String(page) },
+        mapTmdbPage,
+      ))!,
   };
 }
 

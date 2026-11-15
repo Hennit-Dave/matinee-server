@@ -5,7 +5,7 @@ import { createHealthHandler } from '../health/health.js';
 import { createErrorHandler, notFoundHandler } from '../http/errors.js';
 import { createLogger, recordRouteBase, requestLogger, type Logger } from '../http/logger.js';
 import { requestIdMiddleware } from '../http/requestId.js';
-import { createMoviesRouter } from '../movies/routes.js';
+import { createGenresRouter, createMoviesRouter } from '../movies/routes.js';
 import type { MovieService } from '../movies/service.js';
 import type { ShowtimeService } from '../showtimes/showtime.js';
 
@@ -30,7 +30,10 @@ export function createApp(deps: AppDeps) {
   app.use(requestLogger(logger));
 
   app.get('/health', createHealthHandler(deps.db, deps.redis));
-  if (deps.movies) app.use('/movies', createMoviesRouter(deps.movies, deps.showtimes));
+  if (deps.movies) {
+    app.use('/movies', createMoviesRouter(deps.movies, deps.showtimes));
+    app.use('/genres', createGenresRouter(deps.movies));
+  }
 
   app.use(notFoundHandler);
   app.use(createErrorHandler(logger));

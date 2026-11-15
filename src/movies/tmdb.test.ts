@@ -331,3 +331,24 @@ test('detail(id) hits /3/movie/:id with append_to_response, returns null on 404 
   assert.equal(recovered?.id, 900001);
   assert.equal(flaky.calls.length, 2);
 });
+
+test('source.genres() hits /3/genre/movie/list and maps { genres: [{ id, name }] }', async () => {
+  const payload = { genres: [{ id: 28, name: 'Action' }, { id: 878, name: 'Science Fiction' }] };
+  const h = harness([() => Response.json(payload)]);
+  const genres = await h.source.genres();
+  assert.deepEqual(genres, payload);
+  assert.equal(h.calls[0]?.url.pathname, '/3/genre/movie/list');
+});
+
+test('source.discover() hits /3/discover/movie with with_genres, popularity.desc, include_adult=false, and page', async () => {
+  const h = harness([ok]);
+  const page = await h.source.discover(28, 2);
+  assert.equal(page.movies.length, 4);
+  const call = h.calls[0];
+  assert.ok(call);
+  assert.equal(call.url.pathname, '/3/discover/movie');
+  assert.equal(call.url.searchParams.get('with_genres'), '28');
+  assert.equal(call.url.searchParams.get('sort_by'), 'popularity.desc');
+  assert.equal(call.url.searchParams.get('include_adult'), 'false');
+  assert.equal(call.url.searchParams.get('page'), '2');
+});

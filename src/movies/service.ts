@@ -1,7 +1,13 @@
 import { ApiError } from '../http/errors.js';
 import type { Logger } from '../http/logger.js';
 import type { MovieCache } from './cache.js';
-import { MovieSourceError, type MovieDetail, type MoviesPage, type MovieSource } from './movie.js';
+import {
+  MovieSourceError,
+  type GenresResponse,
+  type MovieDetail,
+  type MoviesPage,
+  type MovieSource,
+} from './movie.js';
 
 /**
  * CACHE POLICY (RULES D1.3 / C4). Every TTL and why:
@@ -28,6 +34,12 @@ export const SEARCH_FRESH_TTL_SECONDS = 5 * 60;
 export const SEARCH_STALE_GRACE_SECONDS = 60 * 60;
 export const DETAIL_FRESH_TTL_SECONDS = 24 * 60 * 60;
 export const DETAIL_STALE_GRACE_SECONDS = 7 * 24 * 60 * 60;
+/** TMDB's movie genre list changes at most a few times a year: fresh 7 days, stale grace 30 days. */
+export const GENRES_FRESH_TTL_SECONDS = 7 * 24 * 60 * 60;
+export const GENRES_STALE_GRACE_SECONDS = 30 * 24 * 60 * 60;
+/** Genre discovery matches now-playing cadence: fresh 3 hours, stale grace 24 hours. */
+export const DISCOVER_FRESH_TTL_SECONDS = 3 * 60 * 60;
+export const DISCOVER_STALE_GRACE_SECONDS = 24 * 60 * 60;
 
 /** Bump when the cached value's meaning changes. (A changed Movie SHAPE is already caught: cache.ts re-validates on read.) */
 const KEY_VERSION = 'v1';
@@ -42,6 +54,9 @@ export const nowPlayingKey = (page: number) => `movies:${KEY_VERSION}:now-playin
 export const searchKey = (normalisedQuery: string, page: number) =>
   `movies:${KEY_VERSION}:search:${encodeURIComponent(normalisedQuery)}:page:${page}`;
 export const detailKey = (id: number) => `movies:${KEY_VERSION}:detail:${id}`;
+export const genresKey = () => `movies:${KEY_VERSION}:genres`;
+export const discoverKey = (genreId: number, page: number) =>
+  `movies:${KEY_VERSION}:discover:genre:${genreId}:page:${page}`;
 
 /** Where the answer came from. Sent as `X-Cache` and logged, so "was that TMDB or Redis?" is answerable. */
 export type CacheStatus = 'hit' | 'miss' | 'stale';
@@ -56,11 +71,18 @@ export interface MovieDetailResult {
   cache: CacheStatus;
 }
 
+export interface GenresResult {
+  genres: GenresResponse;
+  cache: CacheStatus;
+}
+
 export interface MovieService {
   nowPlaying(page: number): Promise<MoviesResult>;
   /** `query` must already be normalised (see normaliseQuery). */
   search(query: string, page: number): Promise<MoviesResult>;
   detail(id: number): Promise<MovieDetailResult>;
+  genres(): Promise<GenresResult>;
+  discover(genreId: number, page: number): Promise<MoviesResult>;
 }
 
 export function createMovieService(deps: {
@@ -121,6 +143,10 @@ export function createMovieService(deps: {
     const entry = await cache.readDetail(key);
     return entry ? { value: entry.movie, freshUntil: entry.freshUntil } : null;
   };
+  const readGenres = async (key: string) => {
+    const entry = await cache.readGenres(key);
+    return entry ? { value: entry.genres, freshUntil: entry.freshUntil } : null;
+  };
 
   return {
     nowPlaying: async (page) => {
@@ -155,6 +181,28 @@ export function createMovieService(deps: {
         load: () => source.detail(id),
       });
       return { movie: res.value, cache: res.cache };
+    },
+    genres: async () => {
+      const res = await cacheAside({
+        key: genresKey(),
+        freshTtl: GENRES_FRESH_TTL_SECONDS,
+        staleGrace: GENRES_STALE_GRACE_SECONDS,
+        read: readGenres,
+        write: cache.writeGenres,
+        load: () => source.genres(),
+      });
+      return { genres: res.value, cache: res.cache };
+    },
+    discover: async (genreId, page) => {
+      const res = await cacheAside({
+        key: discoverKey(genreId, page),
+        freshTtl: DISCOVER_FRESH_TTL_SECONDS,
+        staleGrace: DISCOVER_STALE_GRACE_SECONDS,
+        read: readPage,
+        write: cache.write,
+        load: () => source.discover(genreId, page),
+      });
+      return { page: res.value, cache: res.cache };
     },
   };
 }
