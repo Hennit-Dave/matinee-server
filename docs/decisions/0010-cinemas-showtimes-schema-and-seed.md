@@ -21,9 +21,10 @@ Slice 4b introduces Matinee's first Postgres tables (`Cinema`, `Screen`, `Showti
 1. **`Showtime.movieId` is a plain `Int` with no foreign key.**
    Movies are owned by TMDB and cached in Redis; Postgres does not maintain a `movies` table.
    An index `@@index([movieId, startsAt])` keeps per-movie showtime queries fast.
-2. **`priceCents` is a whole integer in minor units; `Screen.totalSeats` holds capacity only.**
+2. **`priceCents` is a whole integer in minor units; `Screen.totalSeats` holds capacity only; `Screen.format` holds projection/audio format.**
    Follows RULES A3 (no floats/decimals for money). The server formats `priceFormatted` (e.g.
    `"$15.50"`) so the mobile app never performs money arithmetic. Seat layouts stay out of this slice.
+   `Screen.format` (`Standard`, `IMAX`, `Dolby Atmos`) is surfaced on each showtime slot to match the Showtimes design.
 3. **Repeatable, idempotent seed keyed on natural keys (`id` and `(screenId, startsAt)`).**
    - `prisma/schema.prisma` enforces `@@unique([screenId, startsAt])` on `Showtime`.
    - `src/db/seed.ts` fetches current TMDB `nowPlaying(1)` IDs (dev/Neon seed only; CI integration

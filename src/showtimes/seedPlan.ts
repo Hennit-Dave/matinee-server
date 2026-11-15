@@ -8,6 +8,7 @@ export interface SeedScreen {
   id: string;
   cinemaId: string;
   name: string;
+  format: string;
   totalSeats: number;
 }
 
@@ -33,11 +34,11 @@ export const SEED_CINEMAS: readonly SeedCinema[] = [
 export const LOAD_TEST_SCREEN_ID = 'bfi-southbank-imax';
 
 export const SEED_SCREENS: readonly SeedScreen[] = [
-  { id: 'curzon-soho-1', cinemaId: 'curzon-soho', name: 'Screen 1', totalSeats: 120 },
-  { id: 'curzon-soho-2', cinemaId: 'curzon-soho', name: 'Screen 2', totalSeats: 84 },
-  { id: LOAD_TEST_SCREEN_ID, cinemaId: 'bfi-southbank', name: 'IMAX', totalSeats: 320 },
-  { id: 'bfi-southbank-nft1', cinemaId: 'bfi-southbank', name: 'NFT1', totalSeats: 180 },
-  { id: 'prince-charles-main', cinemaId: 'prince-charles', name: 'Main House', totalSeats: 140 },
+  { id: 'curzon-soho-1', cinemaId: 'curzon-soho', name: 'Screen 1', format: 'Standard', totalSeats: 120 },
+  { id: 'curzon-soho-2', cinemaId: 'curzon-soho', name: 'Screen 2', format: 'Standard', totalSeats: 84 },
+  { id: LOAD_TEST_SCREEN_ID, cinemaId: 'bfi-southbank', name: 'IMAX', format: 'IMAX', totalSeats: 320 },
+  { id: 'bfi-southbank-nft1', cinemaId: 'bfi-southbank', name: 'NFT1', format: 'Dolby Atmos', totalSeats: 180 },
+  { id: 'prince-charles-main', cinemaId: 'prince-charles', name: 'Main House', format: 'Standard', totalSeats: 140 },
 ];
 
 const DAILY_SLOTS_UTC = [

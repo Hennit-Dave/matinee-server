@@ -12,6 +12,7 @@ export const ShowtimeSlotSchema = z.strictObject({
   time: z.string().regex(/^\d{2}:\d{2}$/),
   screenId: z.string(),
   screenName: z.string(),
+  format: z.string(),
   totalSeats: z.number().int().positive(),
   priceCents: z.number().int().nonnegative(),
   /** Server-formatted display price (e.g. "$15.50") so the app never computes money. */
@@ -47,6 +48,7 @@ export interface ShowtimeRow {
   screen: {
     id: string;
     name: string;
+    format: string;
     totalSeats: number;
     cinema: {
       id: string;
@@ -111,6 +113,7 @@ export function groupShowtimesByCinemaAndDate(movieId: number, rows: ShowtimeRow
       time,
       screenId: row.screen.id,
       screenName: row.screen.name,
+      format: row.screen.format,
       totalSeats: row.screen.totalSeats,
       priceCents: row.priceCents,
       priceFormatted: formatPriceCents(row.priceCents),

@@ -40,3 +40,12 @@ test('buildSeedPlan schedules every movieId, preserves unique (screenId, startsA
 test('buildSeedPlan rejects an empty movieIds list', () => {
   assert.throws(() => buildSeedPlan([]));
 });
+
+test('SEED_SCREENS assigns expected projection/audio formats', () => {
+  const byId = new Map(SEED_SCREENS.map((s) => [s.id, s.format]));
+  assert.equal(byId.get('curzon-soho-1'), 'Standard');
+  assert.equal(byId.get('curzon-soho-2'), 'Standard');
+  assert.equal(byId.get('bfi-southbank-imax'), 'IMAX');
+  assert.equal(byId.get('bfi-southbank-nft1'), 'Dolby Atmos');
+  assert.equal(byId.get('prince-charles-main'), 'Standard');
+});
