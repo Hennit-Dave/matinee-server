@@ -237,6 +237,10 @@ test('maps a TMDB movie detail into MovieDetail preserving full overview and rou
   assert.deepEqual(detail.genres, ['Drama', 'Thriller']);
   assert.equal(detail.rating, 7.8);
   assert.equal(detail.tagline, 'Every frame leaves a trace.');
+  assert.equal(detail.certification, '12A');
+  assert.equal(detail.language, 'English');
+  assert.equal(detail.director, 'Arthur Vance');
+  assert.deepEqual(detail.cast, ['First Billed', 'Second Billed', 'Third Billed', 'Fourth Billed', 'Fifth Billed']);
 });
 
 test('maps sparse/unrated TMDB movie detail fields to null or empty array', () => {
@@ -265,14 +269,57 @@ test('maps sparse/unrated TMDB movie detail fields to null or empty array', () =
     genres: [],
     rating: null,
     tagline: null,
+    certification: null,
+    language: null,
+    director: null,
+    cast: [],
   });
 });
 
-test('detail(id) hits /3/movie/:id, returns null on 404 without retrying, and retries 503', async () => {
+test('certification prefers GB, then US, then first non-empty country; director joins multiple; language falls back', () => {
+  const usFallback = mapTmdbMovieDetail({
+    id: 1,
+    title: 'US Cert',
+    original_language: 'ja',
+    spoken_languages: [{ iso_639_1: 'fr', english_name: 'French' }],
+    credits: {
+      crew: [
+        { name: 'Director One', job: 'Director' },
+        { name: 'Director Two', job: 'Director' },
+      ],
+      cast: [{ name: 'Lead', order: 0 }],
+    },
+    release_dates: {
+      results: [
+        { iso_3166_1: 'FR', release_dates: [{ certification: '12' }] },
+        { iso_3166_1: 'GB', release_dates: [{ certification: '  ' }] },
+        { iso_3166_1: 'US', release_dates: [{ certification: 'PG-13' }] },
+      ],
+    },
+  });
+  assert.equal(usFallback.certification, 'PG-13');
+  assert.equal(usFallback.language, 'French');
+  assert.equal(usFallback.director, 'Director One, Director Two');
+
+  const firstFallback = mapTmdbMovieDetail({
+    id: 2,
+    title: 'FR Cert',
+    release_dates: {
+      results: [
+        { iso_3166_1: 'DE', release_dates: [{ certification: '' }] },
+        { iso_3166_1: 'FR', release_dates: [{ certification: 'Tous publics' }] },
+      ],
+    },
+  });
+  assert.equal(firstFallback.certification, 'Tous publics');
+});
+
+test('detail(id) hits /3/movie/:id with append_to_response, returns null on 404 without retrying, and retries 503', async () => {
   const okDetail = harness([() => Response.json(detailFixture)]);
   const detail = await okDetail.source.detail(900001);
   assert.equal(detail?.id, 900001);
   assert.equal(okDetail.calls[0]?.url.pathname, '/3/movie/900001');
+  assert.equal(okDetail.calls[0]?.url.searchParams.get('append_to_response'), 'credits,release_dates');
 
   const notFound = harness([status(404)]);
   const missing = await notFound.source.detail(999999);

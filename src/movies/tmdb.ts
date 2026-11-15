@@ -43,6 +43,33 @@ const TmdbMovieDetailSchema = TmdbMovieSchema.extend({
   vote_average: z.number().nullish(),
   vote_count: z.number().int().nonnegative().nullish(),
   tagline: z.string().nullish(),
+  original_language: z.string().nullish(),
+  spoken_languages: z
+    .array(
+      z.object({
+        iso_639_1: z.string().nullish(),
+        english_name: z.string().nullish(),
+      }),
+    )
+    .nullish(),
+  credits: z
+    .object({
+      cast: z.array(z.object({ name: z.string(), order: z.number().int().nonnegative().nullish() })).nullish(),
+      crew: z.array(z.object({ name: z.string(), job: z.string().nullish() })).nullish(),
+    })
+    .nullish(),
+  release_dates: z
+    .object({
+      results: z
+        .array(
+          z.object({
+            iso_3166_1: z.string(),
+            release_dates: z.array(z.object({ certification: z.string().nullish() })).nullish(),
+          }),
+        )
+        .nullish(),
+    })
+    .nullish(),
 });
 
 const API_BASE = 'https://api.themoviedb.org/3';
@@ -108,6 +135,64 @@ function toTagline(tagline: string | null | undefined): string | null {
   return trimmed || null;
 }
 
+const MAX_CAST_NAMES = 5;
+
+function firstCertForCountry(
+  entries: Array<{ certification?: string | null | undefined }> | null | undefined,
+): string | null {
+  for (const entry of entries ?? []) {
+    const cert = (entry.certification ?? '').trim();
+    if (cert) return cert;
+  }
+  return null;
+}
+
+function toCertification(releaseDates: z.infer<typeof TmdbMovieDetailSchema>['release_dates']): string | null {
+  const results = releaseDates?.results ?? [];
+  for (const region of ['GB', 'US'] as const) {
+    const match = results.find((r) => r.iso_3166_1 === region);
+    const cert = firstCertForCountry(match?.release_dates);
+    if (cert) return cert;
+  }
+  for (const country of results) {
+    const cert = firstCertForCountry(country.release_dates);
+    if (cert) return cert;
+  }
+  return null;
+}
+
+function toLanguage(
+  originalLanguage: string | null | undefined,
+  spokenLanguages: z.infer<typeof TmdbMovieDetailSchema>['spoken_languages'],
+): string | null {
+  const languages = spokenLanguages ?? [];
+  if (originalLanguage) {
+    const matched = languages.find((l) => l.iso_639_1 === originalLanguage && (l.english_name ?? '').trim());
+    if (matched) return matched.english_name!.trim();
+  }
+  for (const lang of languages) {
+    const name = (lang.english_name ?? '').trim();
+    if (name) return name;
+  }
+  return null;
+}
+
+function toDirector(credits: z.infer<typeof TmdbMovieDetailSchema>['credits']): string | null {
+  const directors = (credits?.crew ?? [])
+    .filter((member) => member.job === 'Director')
+    .map((member) => member.name.trim())
+    .filter(Boolean);
+  return directors.length > 0 ? directors.join(', ') : null;
+}
+
+function toCast(credits: z.infer<typeof TmdbMovieDetailSchema>['credits']): string[] {
+  return [...(credits?.cast ?? [])]
+    .sort((a, b) => (a.order ?? Number.MAX_SAFE_INTEGER) - (b.order ?? Number.MAX_SAFE_INTEGER))
+    .map((member) => member.name.trim())
+    .filter(Boolean)
+    .slice(0, MAX_CAST_NAMES);
+}
+
 export function mapTmdbMovie(raw: z.infer<typeof TmdbMovieSchema>): Movie {
   return {
     id: raw.id,
@@ -144,6 +229,10 @@ export function mapTmdbMovieDetail(body: unknown): MovieDetail {
     genres: toGenres(raw.genres),
     rating: toRating(raw.vote_average, raw.vote_count),
     tagline: toTagline(raw.tagline),
+    certification: toCertification(raw.release_dates),
+    language: toLanguage(raw.original_language, raw.spoken_languages),
+    director: toDirector(raw.credits),
+    cast: toCast(raw.credits),
   };
 }
 
@@ -282,7 +371,10 @@ export function createTmdbMovieSource(deps: TmdbDeps): MovieSource {
     nowPlaying: async (page) => (await requestTmdb('/movie/now_playing', { page: String(page) }, mapTmdbPage))!,
     search: async (query, page) =>
       (await requestTmdb('/search/movie', { query, page: String(page), include_adult: 'false' }, mapTmdbPage))!,
-    detail: (id) => requestTmdb(`/movie/${id}`, {}, mapTmdbMovieDetail, { allowNotFound: true }),
+    detail: (id) =>
+      requestTmdb(`/movie/${id}`, { append_to_response: 'credits,release_dates' }, mapTmdbMovieDetail, {
+        allowNotFound: true,
+      }),
   };
 }
 

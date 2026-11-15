@@ -28,6 +28,10 @@ const DETAIL: MovieDetail = {
   genres: ['Science Fiction', 'Adventure'],
   rating: 7.8,
   tagline: 'Beyond fear, destiny awaits.',
+  certification: '12A',
+  language: 'English',
+  director: 'Denis Villeneuve',
+  cast: ['Timothée Chalamet', 'Rebecca Ferguson'],
 };
 
 const SHOWTIMES: MovieShowtimesResponse = {

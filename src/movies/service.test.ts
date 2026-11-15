@@ -36,6 +36,10 @@ const detailOf = (id: number, label: string): MovieDetail => ({
   genres: ['Drama'],
   rating: 7.5,
   tagline: null,
+  certification: '12A',
+  language: 'English',
+  director: 'Jane Director',
+  cast: ['Lead Actor'],
 });
 
 function setup() {
