@@ -30,3 +30,7 @@ I learned that squash-merging creates a new commit ID, so Gitleaks exceptions ti
 
 The app asks my server for movie data so the TMDB key stays out of the mobile app, where someone could extract it. The server also caches responses and translates TMDB's fields in one place, keeping the app protected from changes to that format. TMDB supplies movie information, but our cinema schedules belong in our own database because we control the screens, times, and bookings. If a movie does not exist, the user sees a "not found" state (`404`). If TMDB is unavailable, we show an older cached copy when possible; otherwise, we return `503` and offer a retry. Checking Figma first revealed missing data such as age ratings, language, director, cast, and showtimes grouped by format, so I updated the server before building screens that needed those details.
 
+## Slice 5a · Seat holds and the double-booking guarantee — 2026-11-16
+
+What clicked for me was that Redis gives users a fast, temporary hold, but the database's unique constraint is what ultimately prevents two bookings for the same seat. I learned that even if the hold system fails, the database still needs to protect that rule.
+
