@@ -7,6 +7,9 @@ import { seedDatabase, seedSeats } from '../db/seed.js';
 import { createLogger } from '../http/logger.js';
 import { createRedisClient } from '../jobs/connection.js';
 import { ShowtimeSeatsResponseSchema } from './seat.js';
+import { createBookingRepo } from '../bookings/bookingRepo.js';
+import { createRedisHoldStore } from '../bookings/holdStore.js';
+import { createRedisRyowStore } from '../bookings/ryow.js';
 import { createSeatService } from './seatService.js';
 import { LOAD_TEST_SCREEN_ID, SEED_SCREENS } from './seedPlan.js';
 
@@ -25,7 +28,13 @@ test('the seat seed is idempotent and GET /showtimes/:id/seats serves the real s
   const logger = createLogger(() => {});
   const db = createDbClients({ primaryUrl: TEST_DATABASE_URL, readUrl: TEST_DATABASE_READ_URL });
   const redis = createRedisClient(logger, process.env.TEST_REDIS_URL ?? 'redis://127.0.0.1:6379');
-  const server = createApp({ logger, db, redis, seats: createSeatService(db) }).listen(0);
+  await redis.connect(); // seat state comes from Redis too, and a closed connection fails closed
+  const seatService = createSeatService(db, {
+    repo: createBookingRepo(db),
+    holds: createRedisHoldStore(redis),
+    ryow: createRedisRyowStore(redis),
+  });
+  const server = createApp({ logger, db, redis, seats: seatService }).listen(0);
   const emptyScreenId = `itest-empty-${randomUUID()}`;
 
   try {

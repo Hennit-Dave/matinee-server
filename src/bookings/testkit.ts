@@ -109,6 +109,7 @@ export async function openStack(options: StackOptions = {}): Promise<Stack> {
     server,
     async close() {
       await new Promise((resolve) => server.close(resolve));
+      await clearTouched(db, redis.status === 'ready' ? redis : undefined);
       redis.disconnect();
       await closeDbClients(db);
     },
@@ -116,6 +117,20 @@ export async function openStack(options: StackOptions = {}): Promise<Stack> {
 }
 
 let showtimeCursor = 0;
+
+/** Showtimes a test has used and not yet cleaned up. Every stack clears them on close, so no test file leaves seats booked or held. */
+const touchedShowtimes = new Set<string>();
+
+async function clearTouched(db: DbClients, redis: Redis | undefined): Promise<void> {
+  for (const showtimeId of [...touchedShowtimes]) {
+    if (!redis) {
+      await db.primary.booking.deleteMany({ where: { showtimeId } });
+      continue; // its Redis keys are cleared by whichever stack closes with a connected Redis
+    }
+    await clearShowtime(db, redis, showtimeId);
+    touchedShowtimes.delete(showtimeId);
+  }
+}
 
 /** A showtime of the 320-seat room that no other test has used, with up to `seatCount` of its seats. */
 export async function freshShowtime(
@@ -137,6 +152,7 @@ export async function freshShowtime(
     take: seatCount,
   });
   await clearShowtime(db, redis, showtime.id);
+  touchedShowtimes.add(showtime.id);
   return { showtimeId: showtime.id, seatIds: seats.map((s) => s.id) };
 }
 

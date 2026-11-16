@@ -1,6 +1,8 @@
 import express from 'express';
 import type { Redis } from 'ioredis';
 import type { DbClients } from '../db/clients.js';
+import type { BookingService } from '../bookings/bookingService.js';
+import { createBookingsRouter } from '../bookings/routes.js';
 import { createHealthHandler } from '../health/health.js';
 import { createErrorHandler, notFoundHandler } from '../http/errors.js';
 import { createLogger, recordRouteBase, requestLogger, type Logger } from '../http/logger.js';
@@ -23,6 +25,8 @@ export interface AppDeps {
   showtimes?: ShowtimeService;
   /** When absent, /showtimes is simply not mounted (same convention as `movies`). */
   seats?: SeatService;
+  /** Seat holds and bookings, mounted under /showtimes too. When absent those routes are not mounted. */
+  bookings?: BookingService;
 }
 
 export function createApp(deps: AppDeps) {
@@ -41,6 +45,9 @@ export function createApp(deps: AppDeps) {
 
   if (deps.seats) {
     app.use('/showtimes', createShowtimesRouter(deps.seats));
+  }
+  if (deps.bookings) {
+    app.use('/showtimes', createBookingsRouter(deps.bookings));
   }
 
   app.use(notFoundHandler);

@@ -1,0 +1,60 @@
+# Can the tests fail? Five deliberate breakages of the guarantee, each run against the suite, then reverted. 2026-11-16T16:52:45Z
+# Throwaway Postgres + local Redis. Each breakage was reverted before the next; the last section is the full suite green again.
+
+## 1. Remove the database's unique key on bookings (the final guard)
+✖ the database alone refuses a seat sold twice (the final guard) (186.01425ms)
+✖ Redis checks bypassed entirely, 50 users confirming the same seat: the unique constraint lets exactly one through, nobody gets a 500 (31.3205ms)
+✖ multi-seat confirms are all-or-nothing even when only the database is deciding (25.74825ms)
+✖ a hold that expires between the check and the insert cannot double-book: the constraint stops the slower user (122.649667ms)
+ℹ pass 0
+ℹ fail 4
+✖ failing tests:
+(unique key restored: 1 index)
+
+## 2. Take a hold with GET-then-SET instead of one atomic script
+✖ 200 users take the same seat at the same moment: exactly one wins, 199 are told seat_taken (220.902334ms)
+✖ the same storm over HTTP: one 201, the rest 409 with the contested seat (69.020834ms)
+✖ multi-seat holds are all-or-nothing: after a storm of overlapping requests no partial hold survives (26.2675ms)
+ℹ pass 0
+ℹ fail 3
+✖ failing tests:
+
+## 3. Release with a plain DEL instead of compare-and-delete
+✖ release is owner-only: a stranger cannot free your seat, you can, and then someone else can take it (206.013125ms)
+ℹ pass 0
+ℹ fail 1
+✖ failing tests:
+
+## 4. Let a lingering hold outrank a booking in the seat map
+✖ GET /showtimes/:id/seats shows available, held and sold, and sold wins over a lingering hold (221.418916ms)
+ℹ pass 0
+ℹ fail 1
+✖ failing tests:
+
+## 5. Ignore read-your-own-writes (always read the replica)
+✖ read-your-own-writes: for a few seconds after booking, the booker reads from the primary; everyone else reads the (lagging) replica (888.88775ms)
+ℹ pass 0
+ℹ fail 1
+✖ failing tests:
+
+## Everything reverted: the whole suite again
+✔ 200 users take the same seat at the same moment: exactly one wins, 199 are told seat_taken (213.244ms)
+✔ the same storm over HTTP: one 201, the rest 409 with the contested seat (61.405959ms)
+✔ multi-seat holds are all-or-nothing: after a storm of overlapping requests no partial hold survives (24.692334ms)
+✔ asking again for seats you already hold succeeds and does not extend the window (76.675875ms)
+✔ release is owner-only: a stranger cannot free your seat, you can, and then someone else can take it (18.5965ms)
+✔ confirm needs a hold you own: no hold, someone else's hold, and an expired hold are all refused and write nothing (575.214875ms)
+✔ confirm returns the server-priced booking, writes one row per seat, and leaves the hold to expire (32.392417ms)
+✔ the database alone refuses a seat sold twice (the final guard) (33.828833ms)
+✔ Redis checks bypassed entirely, 50 users confirming the same seat: the unique constraint lets exactly one through, nobody gets a 500 (82.589458ms)
+✔ multi-seat confirms are all-or-nothing even when only the database is deciding (55.725083ms)
+✔ a hold that expires between the check and the insert cannot double-book: the constraint stops the slower user (132.005791ms)
+✔ a seat that was already sold cannot be held, and the failed attempt leaves no hold behind (16.327833ms)
+✔ one taken seat fails the whole request and the caller is left holding nothing (15.05575ms)
+✔ GET /showtimes/:id/seats shows available, held and sold, and sold wins over a lingering hold (24.577375ms)
+✔ read-your-own-writes: for a few seconds after booking, the booker reads from the primary; everyone else reads the (lagging) replica (1480.63025ms)
+✔ Redis not ready: every hold route fails closed with a retryable 503, the seat map too, and service resumes when Redis is back (39.823792ms)
+✔ Redis connected but not answering: the hold times out into a 503 (never hangs, never falls open), and a retry is safe (3031.836667ms)
+✔ requests are validated before anything runs: ids, seat lists, header, and seats from another screen (43.240208ms)
+ℹ pass 19
+ℹ fail 0

@@ -9,9 +9,10 @@ import { formatPriceCents } from './showtime.js';
  */
 
 /**
- * Per-showtime availability. Only `available` is emitted today: bookings and Redis holds arrive in the
- * traffic slice, which is the only thing that will ever produce `held` and `sold`. The values are
- * defined now so that slice does not change the contract. "Yours" (selected) is client-only state.
+ * Per-showtime availability. `sold` means a booking row exists; `held` means a live Redis hold exists (someone,
+ * possibly the caller, has the seat for the next few minutes); otherwise `available` (ADR 0015). The values
+ * were in the contract from day one so adding holds changed no response shape. "Yours" (selected) is
+ * client-only state.
  */
 export const SEAT_STATUSES = ['available', 'held', 'sold'] as const;
 export type SeatStatus = (typeof SEAT_STATUSES)[number];
@@ -78,19 +79,31 @@ export interface ShowtimeSeatsRow {
 }
 
 export interface SeatService {
-  /** `null` when the showtime does not exist. */
-  forShowtime(showtimeId: string): Promise<ShowtimeSeatsResponse | null>;
+  /**
+   * `null` when the showtime does not exist. `viewerId` is the caller's client id when they sent one: for a few
+   * seconds after that caller books, their reads go to the primary so they see their own booking
+   * (read-your-own-writes, RULES C2).
+   */
+  forShowtime(showtimeId: string, viewerId?: string): Promise<ShowtimeSeatsResponse | null>;
 }
 
 /**
- * Decides each seat's status for one showtime. This is the single seam the traffic slice replaces: it
- * will build a resolver from the showtime's bookings and live Redis holds. Never cache what it returns
- * (RULES C4: seat availability is never cached in a way that could sell a seat twice).
+ * Decides each seat's status for one showtime. Built from the showtime's bookings and live Redis holds by
+ * `seatStatusResolver`. Never cache what it returns (RULES C4: seat availability is never cached in a way that
+ * could sell a seat twice).
  */
 export type SeatStatusResolver = (seat: SeatRecord) => SeatStatus;
 
-/** Until bookings exist, every seat is free. */
+/** Every seat free. The default for a showtime nobody has touched, and what the layout tests use. */
 export const allSeatsAvailable: SeatStatusResolver = () => 'available';
+
+/**
+ * `sold` beats `held`: a booked seat is sold even while its hold key still exists (confirming a booking
+ * leaves the hold to expire on its own), and the seat is only `held` if it is not sold.
+ */
+export function seatStatusResolver(sold: ReadonlySet<string>, held: ReadonlySet<string>): SeatStatusResolver {
+  return (seat) => (sold.has(seat.id) ? 'sold' : held.has(seat.id) ? 'held' : 'available');
+}
 
 function isSeatKind(value: string): value is SeatKind {
   return (SEAT_KINDS as readonly string[]).includes(value);

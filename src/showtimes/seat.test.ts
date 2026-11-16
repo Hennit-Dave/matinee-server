@@ -6,6 +6,7 @@ import {
   ShowtimeSeatsResponseSchema,
   buildShowtimeSeatsResponse,
   groupSeatsIntoRows,
+  seatStatusResolver,
   type SeatRecord,
   type ShowtimeSeatsRow,
 } from './seat.js';
@@ -114,4 +115,14 @@ test('the schemas are strict: unknown keys and bad values are rejected', () => {
   assert.throws(() => ShowtimeSeatsResponseSchema.parse(badStatus));
   assert.throws(() => ShowtimeIdParamsSchema.parse({ id: 'not-a-uuid' }));
   assert.doesNotThrow(() => ShowtimeIdParamsSchema.parse({ id: randomUUID() }));
+});
+
+test('seatStatusResolver: sold beats held, held beats available, and each seat is judged by its own id', () => {
+  const seat = (id: string): SeatRecord => ({ id, row: 'A', number: 1, kind: 'standard' });
+  const [a, b, c, d] = [seat('a'), seat('b'), seat('c'), seat('d')] as const;
+  const resolve = seatStatusResolver(new Set(['a', 'b']), new Set(['b', 'c']));
+  assert.equal(resolve(a), 'sold');
+  assert.equal(resolve(b), 'sold', 'a seat that is booked and still has a hold key is sold');
+  assert.equal(resolve(c), 'held');
+  assert.equal(resolve(d), 'available');
 });
