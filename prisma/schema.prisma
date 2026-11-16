@@ -41,32 +41,65 @@ model Screen {
 /// bookings and Redis holds, never stored here (ADR 0014). The unique key below also serves every
 /// lookup by screen, so it needs no separate index.
 model Seat {
-  id       String @id @default(uuid()) @db.Uuid
-  screenId String @map("screen_id")
+  id       String    @id @default(uuid()) @db.Uuid
+  screenId String    @map("screen_id")
   /// Row letter, "A".."Z". Single letters only, so plain text ordering is the physical order.
   row      String
   /// Seat number within the row, 1-based, left to right as seen from the seats.
   number   Int
   /// "standard" | "wheelchair". A string like Screen.format; validated by the API's Zod contract.
-  kind     String @default("standard")
-  screen   Screen @relation(fields: [screenId], references: [id], onDelete: Cascade)
+  kind     String    @default("standard")
+  screen   Screen    @relation(fields: [screenId], references: [id], onDelete: Cascade)
+  bookings Booking[]
 
   @@unique([screenId, row, number])
   @@map("seats")
 }
 
 model Showtime {
-  id         String   @id @default(uuid()) @db.Uuid
-  /** TMDB movie id — plain integer with no FK because movies live in TMDB, not Postgres (ADR 0010). */
-  movieId    Int      @map("movie_id")
-  screenId   String   @map("screen_id")
-  startsAt   DateTime @map("starts_at") @db.Timestamptz(3)
-  /** Ticket price in minor units (whole integer pence, GBP; RULES A3). Named `priceCents` for historical reasons; renaming needs a migration. */
-  priceCents Int      @map("price_cents")
-  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
-  screen     Screen   @relation(fields: [screenId], references: [id], onDelete: Cascade)
+  id         String    @id @default(uuid()) @db.Uuid
+  /**
+   * TMDB movie id — plain integer with no FK because movies live in TMDB, not Postgres (ADR 0010).
+   */
+  movieId    Int       @map("movie_id")
+  screenId   String    @map("screen_id")
+  startsAt   DateTime  @map("starts_at") @db.Timestamptz(3)
+  /**
+   * Ticket price in minor units (whole integer pence, GBP; RULES A3). Named `priceCents` for historical reasons; renaming needs a migration.
+   */
+  priceCents Int       @map("price_cents")
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  screen     Screen    @relation(fields: [screenId], references: [id], onDelete: Cascade)
+  bookings   Booking[]
 
   @@unique([screenId, startsAt])
   @@index([movieId, startsAt])
   @@map("showtimes")
+}
+
+/// One sold seat for one showtime. A booking is one ROW PER SEAT, so the constraint that makes double
+/// booking impossible sits on the row that represents the sale. `reference` groups the seats confirmed
+/// together (one "order"); a payments table can key on it later without touching the constraint.
+///
+/// Redis holds are the fast path that decides who may TRY to book; this unique key is the final guard that
+/// decides who OWNS the seat, and it still holds if Redis is empty, wrong or down (ADR 0015).
+///
+/// Foreign keys are Restrict, not Cascade: a sale must not vanish because a showtime or seat was deleted.
+model Booking {
+  id         String   @id @default(uuid()) @db.Uuid
+  /// Groups the seats confirmed in one request.
+  reference  String   @db.Uuid
+  showtimeId String   @map("showtime_id") @db.Uuid
+  seatId     String   @map("seat_id") @db.Uuid
+  /// The caller's client id. A stand-in until real auth exists, when it becomes a user id (ADR 0015).
+  ownerId    String   @map("owner_id")
+  /// The showtime's price per seat when it was booked, integer pence, GBP (RULES A3).
+  priceCents Int      @map("price_cents")
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  showtime   Showtime @relation(fields: [showtimeId], references: [id], onDelete: Restrict)
+  seat       Seat     @relation(fields: [seatId], references: [id], onDelete: Restrict)
+
+  /// The safety net (RULES D5.2). Its leading column also serves "which seats are sold for this showtime".
+  @@unique([showtimeId, seatId])
+  @@map("bookings")
 }

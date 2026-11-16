@@ -1,3 +1,7 @@
+import { createBookingRepo } from '../bookings/bookingRepo.js';
+import { createBookingService } from '../bookings/bookingService.js';
+import { createRedisHoldStore } from '../bookings/holdStore.js';
+import { createRedisRyowStore } from '../bookings/ryow.js';
 import { closeDbClients, createDbClients } from '../db/clients.js';
 import { createLogger } from '../http/logger.js';
 import { createRedisClient } from '../jobs/connection.js';
@@ -56,9 +60,13 @@ const movies = createMovieService({
   logger,
 });
 const showtimes = createShowtimeService(db);
-const seats = createSeatService(db);
+const bookingRepo = createBookingRepo(db);
+const holds = createRedisHoldStore(redis);
+const ryow = createRedisRyowStore(redis);
+const seats = createSeatService(db, { repo: bookingRepo, holds, ryow });
+const bookings = createBookingService({ repo: bookingRepo, holds, ryow, logger });
 
-const app = createApp({ logger, db, redis, movies, showtimes, seats });
+const app = createApp({ logger, db, redis, movies, showtimes, seats, bookings });
 
 const server = app.listen(port, () => {
   logger.info('api_listening', { port });

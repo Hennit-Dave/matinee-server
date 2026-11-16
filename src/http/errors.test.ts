@@ -67,3 +67,23 @@ test('upstream_unavailable is a retryable 503 and its internal reason is not sen
   assert.equal(body.error.code, 'upstream_unavailable');
   assert.ok(!JSON.stringify(body).includes('rejected'));
 });
+
+test('the traffic-slice codes: two 409s that name the seats, and a retryable 503 with Retry-After', () => {
+  assert.equal(new ApiError('seat_taken').status, 409);
+  assert.equal(new ApiError('seat_not_held').status, 409);
+  assert.equal(new ApiError('holds_unavailable').status, 503);
+
+  const handler = createErrorHandler(createLogger(() => {}));
+  const headers: Record<string, string> = {};
+  const { res, state } = fakeRes();
+  (res as unknown as { setHeader: (k: string, v: string) => void }).setHeader = (k, v) => {
+    headers[k] = v;
+  };
+  handler(new ApiError('seat_taken', { seatIds: ['s1'] }), {} as never, res, (() => {}) as never);
+  assert.deepEqual((state.body as { error: { seatIds: string[] } }).error.seatIds, ['s1']);
+  assert.deepEqual(headers, {}, 'no Retry-After on a 409');
+
+  handler(new ApiError('holds_unavailable', { reason: 'redis not ready (end)' }), {} as never, res, (() => {}) as never);
+  assert.equal(headers['Retry-After'], '2');
+  assert.ok(!JSON.stringify(state.body).includes('redis'), 'the internal reason is not sent');
+});

@@ -11,7 +11,8 @@ The API, background jobs and database behind Matinee, a cinema ticket booking ap
 Slice 0: an Express + TypeScript skeleton with a real `/health` (checks Postgres primary + replica
 and Redis, 503 on failure), structured logging, request IDs and a Zod validation helper.
 Slice 1: the movie endpoints below (TMDB through this server, cached in Redis). Showtimes and the
-seat map are built (see "Seat map endpoint"); bookings are not built yet. This README is written as
+seat map are built (see "Seat map endpoint"); seat holds and bookings are built (see "Seat holds and
+bookings"), without payments. This README is written as
 the build goes.
 
 ## What it is
@@ -75,12 +76,42 @@ key still expires (27 h and 65 min in Redis).
 
 `:id` is a showtime id (the `id` of a slot in `GET /movies/:id/showtimes`). A malformed id is a `400
 validation_failed`, an unknown showtime a `404 not_found`. `priceFormatted` is a finished string
-(`"£18.50"`); the app never does money maths. Seats belong to the screen, and every seat is
-`available` until bookings and holds exist (ADR 0014). The contract is in `src/showtimes/seat.ts`.
+(`"£18.50"`); the app never does money maths. Seats belong to the screen (ADR 0014). `status` is
+`available`, `held` (a live Redis hold) or `sold` (a booking exists), sold winning; see "Seat holds and
+bookings" below. With Redis unreachable the map is a `503`, not a guess. The contract is in
+`src/showtimes/seat.ts`.
 
 After pulling this change, add the table and the seats: `npm run db:migrate`, then
 `npm run db:seed -- --seats-only` (seats only: no TMDB token needed, no showtime or price touched).
 A plain `npm run db:seed` also seeds seats.
+
+## Seat holds and bookings
+
+A seat is never sold twice. Two layers, each testable alone (ADR 0015): a Redis hold decides who may *try*,
+and Postgres `UNIQUE (showtime_id, seat_id)` on `bookings` decides who *owns* the seat, even if Redis is
+empty, wrong or down.
+
+| Route | Does | Success | Refusals |
+|---|---|---|---|
+| `POST /showtimes/:id/holds` `{ seatIds }` | Holds the seats for **10 minutes**, all or nothing | `201 { showtimeId, seatIds, expiresAt, expiresInMs }` | `409 seat_taken { seatIds }` (the seats it could not get), `503 holds_unavailable` |
+| `DELETE /showtimes/:id/holds` `{ seatIds }` | Gives back the caller's own holds (owner-checked, idempotent) | `200 { released }` | `503 holds_unavailable` |
+| `POST /showtimes/:id/bookings` `{ seatIds }` | Turns the caller's holds into bookings, priced on the server | `201 { reference, showtimeId, seats, priceCents, totalCents, totalFormatted }` | `409 seat_not_held { seatIds }`, `409 seat_taken { seatIds }`, `503 holds_unavailable` |
+
+- Every route needs an **`X-Client-Id`** header (a UUID; the app makes one per install). It stands in for a user
+  id until there is auth, and is the owner of holds and bookings. It is not authentication (ADR 0015).
+- `1` to `8` unique seat ids per request, and every seat must belong to the showtime's screen (`400
+  validation_failed` otherwise). Money is whole pence, formatted on the server.
+- **Redis down fails closed**: holds, releases and confirms answer `503 holds_unavailable` with `Retry-After: 2`,
+  and so does the seat map. Nothing is booked without a hold check, and nothing double-books either way.
+- **Read-your-own-writes**: bookings are read from the replica, except for 5 s after the caller's own booking
+  (`X-Client-Id` on the seat-map request), when they come from the primary.
+- `POST /showtimes/:id/bookings` is a **temporary** direct commit with no payment step; the payments slice
+  replaces it with the verified-webhook job (ADR 0015). It is the only way to book today.
+- Needs the migration: `npm run db:migrate` adds `bookings` (a new table only; no existing row changes).
+
+Proof is in `docs/evidence/traffic-5a/`: the tests, a narrated run (`proof.txt`), five deliberate breakages of
+the guarantee that the tests catch (`mutation-checks.txt`), and the race this prevents (`race-demo.txt`: 50 users,
+one seat, no constraint, sold 50 times).
 
 ## Docs
 

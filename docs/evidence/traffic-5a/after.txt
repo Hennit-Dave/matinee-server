@@ -1,0 +1,49 @@
+# AFTER: the same hold suite that was red in before.txt, plus everything else. 2026-11-16T17:00:12Z
+# Throwaway local Postgres + a throwaway local Redis (never Neon, never Railway Redis).
+
+## npm run typecheck
+(no errors)
+
+## npm run lint
+(no problems)
+
+## npm run test:integration   (real Postgres + Redis; the seat-hold suite is the first file)
+✔ the hold tests refuse to run against a Redis that is not on this machine (0.572709ms)
+✔ 200 users take the same seat at the same moment: exactly one wins, 199 are told seat_taken (208.561042ms)
+✔ the same storm over HTTP: one 201, the rest 409 with the contested seat (65.68225ms)
+✔ multi-seat holds are all-or-nothing: after a storm of overlapping requests no partial hold survives (22.07975ms)
+✔ asking again for seats you already hold succeeds and does not extend the window (74.525084ms)
+✔ release is owner-only: a stranger cannot free your seat, you can, and then someone else can take it (19.602ms)
+✔ confirm needs a hold you own: no hold, someone else's hold, and an expired hold are all refused and write nothing (1427.239208ms)
+✔ confirm returns the server-priced booking, writes one row per seat, and leaves the hold to expire (38.536583ms)
+✔ the database alone refuses a seat sold twice (the final guard) (27.09525ms)
+✔ Redis checks bypassed entirely, 50 users confirming the same seat: the unique constraint lets exactly one through, nobody gets a 500 (70.538459ms)
+✔ multi-seat confirms are all-or-nothing even when only the database is deciding (37.513459ms)
+✔ a hold that expires between the check and the insert cannot double-book: the constraint stops the slower user (118.703666ms)
+✔ a seat that was already sold cannot be held, and the failed attempt leaves no hold behind (15.059875ms)
+✔ one taken seat fails the whole request and the caller is left holding nothing (12.944625ms)
+✔ GET /showtimes/:id/seats shows available, held and sold, and sold wins over a lingering hold (23.369542ms)
+✔ read-your-own-writes: for a few seconds after booking, the booker reads from the primary; everyone else reads the (lagging) replica (2793.108625ms)
+✔ Redis not ready: every hold route fails closed with a retryable 503, the seat map too, and service resumes when Redis is back (29.538208ms)
+✔ Redis connected but not answering: the hold times out into a 503 (never hangs, never falls open), and a retry is safe (3028.301875ms)
+✔ requests are validated before anything runs: ids, seat lists, header, and seats from another screen (42.457334ms)
+✔ GET /health is 200 against real Postgres and Redis (51.53575ms)
+✔ GET /health is 503 when Redis is unreachable (2010.446459ms)
+✔ the seat seed is idempotent and GET /showtimes/:id/seats serves the real seat map from Postgres (340.405083ms)
+✔ seedDatabase is idempotent and GET /movies/:id/showtimes reads from Postgres via replica (245.069959ms)
+ℹ tests 23
+ℹ pass 23
+ℹ fail 0
+ℹ skipped 0
+
+## npm test   (unit + integration together, infra env set)
+ℹ tests 177
+ℹ pass 177
+ℹ fail 0
+ℹ skipped 0
+
+## npm test   (what a machine with no database sees: integration tests skip)
+ℹ tests 177
+ℹ pass 155
+ℹ fail 0
+ℹ skipped 22

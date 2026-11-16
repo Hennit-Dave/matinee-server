@@ -1,0 +1,45 @@
+# BEFORE: the seat-hold integration tests, run on main (feat/seat-holds, baseline commit)
+# Run:  node --import tsx --test --test-concurrency=1 src/bookings/holds.integration.test.ts
+# Against: throwaway Postgres + a throwaway local Redis (never Neon, never Railway Redis)
+# Date: 2026-11-16T16:47:13Z
+
+node:internal/modules/esm/resolve:271
+    throw new ERR_MODULE_NOT_FOUND(
+          ^
+
+Error [ERR_MODULE_NOT_FOUND]: Cannot find module '/Users/blk/Developer/Matinee/matinee-server/src/bookings/booking.js' imported from /Users/blk/Developer/Matinee/matinee-server/src/bookings/holds.integration.test.ts
+    at finalizeResolution (node:internal/modules/esm/resolve:271:11)
+    at moduleResolve (node:internal/modules/esm/resolve:865:10)
+    at defaultResolve (node:internal/modules/esm/resolve:992:11)
+    at #cachedDefaultResolve (node:internal/modules/esm/loader:691:20)
+    at #resolveAndMaybeBlockOnLoaderThread (node:internal/modules/esm/loader:708:38)
+    at nextStep (node:internal/modules/customization_hooks:189:26)
+    at resolveBaseSync (file:///Users/blk/Developer/Matinee/matinee-server/node_modules/tsx/dist/register-nyXW-TH3.mjs:2:11092)
+    at resolveDirectorySync (file:///Users/blk/Developer/Matinee/matinee-server/node_modules/tsx/dist/register-nyXW-TH3.mjs:2:12398)
+    at resolveTsPathsSync (file:///Users/blk/Developer/Matinee/matinee-server/node_modules/tsx/dist/register-nyXW-TH3.mjs:2:13605)
+    at resolve (file:///Users/blk/Developer/Matinee/matinee-server/node_modules/tsx/dist/register-nyXW-TH3.mjs:2:16832) {
+  code: 'ERR_MODULE_NOT_FOUND',
+  url: 'file:///Users/blk/Developer/Matinee/matinee-server/src/bookings/booking.js'
+}
+
+Node.js v24.16.0
+✖ src/bookings/holds.integration.test.ts (164.618083ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 169.0035
+
+✖ failing tests:
+
+test at src/bookings/holds.integration.test.ts:1:1
+✖ src/bookings/holds.integration.test.ts (164.618083ms)
+  'test failed'
+
+# Reading this: on main there is no Booking table, no hold store and no hold routes, so the suite cannot even
+# load (the modules it imports do not exist yet). This commit is the spec the implementation has to satisfy.
+# The problem it solves is shown in race-demo.txt: 50 users, one seat, check-then-insert with no constraint
+# sold the seat 50 times; with UNIQUE (showtime_id, seat_id) it sold it once.

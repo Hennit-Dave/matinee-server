@@ -1,0 +1,43 @@
+# Migration 20261116000001_bookings: existing rows are untouched. Throwaway local Postgres, seeded (3 cinemas, 5 screens, 105 showtimes, 844 seats). 2026-11-16T16:48:36Z
+
+## BEFORE the migration (table | row count | md5 of every row)
+cinemas | rows=3 | md5=1a5cc2b4b5f95bd6e3071931eefcbd55
+screens | rows=5 | md5=6c0e3831e2e7779cd8b1ca3ec3026125
+seats | rows=844 | md5=0c8cd667e5ddd97659e9850b95694c64
+showtimes | rows=105 | md5=fb920cbaf950b35f33bb147a4f3d2bbc
+
+## Applying: npx prisma migrate deploy
+4 migrations found in prisma/migrations
+Applying migration `20261116000001_bookings`
+The following migration(s) have been applied:
+All migrations have been successfully applied.
+
+## AFTER
+cinemas | rows=3 | md5=1a5cc2b4b5f95bd6e3071931eefcbd55
+screens | rows=5 | md5=6c0e3831e2e7779cd8b1ca3ec3026125
+seats | rows=844 | md5=0c8cd667e5ddd97659e9850b95694c64
+showtimes | rows=105 | md5=fb920cbaf950b35f33bb147a4f3d2bbc
+
+## The new table
+bookings rows: 0
+                               Table "public.bookings"
+   Column    |            Type             | Collation | Nullable |      Default      
+-------------+-----------------------------+-----------+----------+-------------------
+ id          | uuid                        |           | not null | 
+ reference   | uuid                        |           | not null | 
+ showtime_id | uuid                        |           | not null | 
+ seat_id     | uuid                        |           | not null | 
+ owner_id    | text                        |           | not null | 
+ price_cents | integer                     |           | not null | 
+ created_at  | timestamp(3) with time zone |           | not null | CURRENT_TIMESTAMP
+Indexes:
+    "bookings_pkey" PRIMARY KEY, btree (id)
+    "bookings_showtime_id_seat_id_key" UNIQUE, btree (showtime_id, seat_id)
+Foreign-key constraints:
+    "bookings_seat_id_fkey" FOREIGN KEY (seat_id) REFERENCES seats(id) ON UPDATE CASCADE ON DELETE RESTRICT
+    "bookings_showtime_id_fkey" FOREIGN KEY (showtime_id) REFERENCES showtimes(id) ON UPDATE CASCADE ON DELETE RESTRICT
+
+## Drift check: schema.prisma vs the migrated database ('empty migration' = no drift)
+
+-- This is an empty migration.
+

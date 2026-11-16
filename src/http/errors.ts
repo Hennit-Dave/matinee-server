@@ -13,7 +13,10 @@ export type ErrorCode =
   | 'payload_too_large'
   | 'internal_error'
   | 'service_unavailable'
-  | 'upstream_unavailable';
+  | 'upstream_unavailable'
+  | 'seat_taken'
+  | 'seat_not_held'
+  | 'holds_unavailable';
 
 const STATUS: Record<ErrorCode, number> = {
   not_found: 404,
@@ -23,6 +26,9 @@ const STATUS: Record<ErrorCode, number> = {
   internal_error: 500,
   service_unavailable: 503,
   upstream_unavailable: 503,
+  seat_taken: 409,
+  seat_not_held: 409,
+  holds_unavailable: 503,
 };
 
 // Safe English defaults for debugging. The app owns user-facing copy and switches on `code`.
@@ -35,7 +41,15 @@ const MESSAGE: Record<ErrorCode, string> = {
   service_unavailable: 'The service is temporarily unavailable.',
   // A third party we depend on (TMDB) is down and we have nothing cached. Retryable.
   upstream_unavailable: 'Movie data is temporarily unavailable. Please try again shortly.',
+  // Traffic slice (ADR 0015). The two 409s carry `seatIds`: which seats the caller cannot have / does not hold.
+  seat_taken: 'One or more of those seats are no longer available.',
+  seat_not_held: 'You do not hold one or more of those seats.',
+  // Redis is the seat-hold store; when it cannot be reached we refuse rather than guess (fail closed).
+  holds_unavailable: 'Seat reservations are temporarily unavailable. Please try again shortly.',
 };
+
+/** Seconds a client should wait before retrying a `holds_unavailable` (sent as `Retry-After`). */
+export const HOLDS_RETRY_AFTER_SECONDS = 2;
 
 /** One field-level problem. Never carries the submitted value. */
 export interface ErrorDetail {
@@ -49,15 +63,18 @@ export class ApiError extends Error {
   readonly status: number;
   readonly code: ErrorCode;
   readonly details?: ErrorDetail[];
+  /** The seats a `seat_taken` / `seat_not_held` is about. Sent to the caller; seat ids are not secret. */
+  readonly seatIds?: string[];
   /** Server-side only: logged, never sent. */
   readonly reason?: string;
 
-  constructor(code: ErrorCode, options?: { details?: ErrorDetail[]; reason?: string }) {
+  constructor(code: ErrorCode, options?: { details?: ErrorDetail[]; reason?: string; seatIds?: string[] }) {
     super(MESSAGE[code]);
     this.name = 'ApiError';
     this.code = code;
     this.status = STATUS[code];
     this.details = options?.details;
+    this.seatIds = options?.seatIds;
     this.reason = options?.reason;
   }
 }
@@ -98,12 +115,14 @@ export function createErrorHandler(logger: Logger): ErrorRequestHandler {
     }
 
     res.locals.errorCode = apiError.code;
+    if (apiError.code === 'holds_unavailable') res.setHeader('Retry-After', String(HOLDS_RETRY_AFTER_SECONDS));
     res.status(apiError.status).json({
       error: {
         code: apiError.code,
         message: apiError.message,
         requestId,
         ...(apiError.details ? { details: apiError.details } : {}),
+        ...(apiError.seatIds ? { seatIds: apiError.seatIds } : {}),
       },
     });
   };
