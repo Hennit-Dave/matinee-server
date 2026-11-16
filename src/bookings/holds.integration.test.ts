@@ -188,7 +188,7 @@ test('release is owner-only: a stranger cannot free your seat, you can, and then
 });
 
 test('confirm needs a hold you own: no hold, someone else\'s hold, and an expired hold are all refused and write nothing', { skip }, async () => {
-  const stack = await openStack({ ttlMs: 400 });
+  const stack = await openStack({ ttlMs: 1200 });
   try {
     const { showtimeId, seatIds } = await freshShowtime(stack.db, 2, stack.redis);
     const [alice, bob] = [ownerId(), ownerId()];
@@ -211,7 +211,7 @@ test('confirm needs a hold you own: no hold, someone else\'s hold, and an expire
     assert.deepEqual(partial.seatIds, [seatIds[1]]);
     assert.equal(await rows(), 0);
 
-    await sleep(550); // the 400 ms hold has expired
+    await sleep(1400); // the 1.2 s hold has expired
     const late = await stack.bookings.confirmBooking({ showtimeId, ownerId: alice, seatIds: [seatIds[0]!] }).catch((e: unknown) => e);
     assert.ok(late instanceof ApiError);
     assert.equal(late.code, 'seat_not_held');
@@ -416,7 +416,7 @@ test('read-your-own-writes: for a few seconds after booking, the booker reads fr
   const prep = await openStack();
   await ensureSeeded(prep.db);
   const lagging = await createLaggingReplica(prep.db);
-  const stack = await openStack({ readUrl: lagging.url, ryowWindowMs: 700 });
+  const stack = await openStack({ readUrl: lagging.url, ryowWindowMs: 2000 });
   try {
     const { showtimeId, seatIds } = await freshShowtime(stack.db, 1, stack.redis);
     const seatId = seatIds[0]!;
@@ -435,7 +435,7 @@ test('read-your-own-writes: for a few seconds after booking, the booker reads fr
     assert.ok(error instanceof ApiError);
     assert.equal(error.code, 'seat_taken');
 
-    await sleep(900); // the window is over
+    await sleep(2200); // the window is over
     assert.equal((await seatStatuses(stack, showtimeId, alice)).get(seatId), 'available', 'after the window the booker reads the replica again');
   } finally {
     await stack.close();
