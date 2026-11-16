@@ -54,7 +54,7 @@ const SHOWTIMES: MovieShowtimesResponse = {
               format: 'Standard',
               totalSeats: 120,
               priceCents: 1550,
-              priceFormatted: '$15.50',
+              priceFormatted: '£15.50',
             },
           ],
         },

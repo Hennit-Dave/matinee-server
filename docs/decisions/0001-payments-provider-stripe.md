@@ -18,3 +18,9 @@ Matinee is judged hardest on UI and on traffic management. Reusing proven paymen
 ## Consequences
 - Payment code sits behind one provider module, so a second provider stays possible later.
 - No adapter-pattern story from payments. TMDB (one file knows its shape) carries that story.
+
+## Addendum — 2026-11-16
+
+Matinee's display currency is **GBP**. When payments are built, Stripe charges in `currency: 'gbp'`, with
+`amount` in pence, which is the integer minor-unit value already stored as `priceCents`. No conversion is
+needed. This is not built yet; see ADR 0010's addendum for how prices are displayed today.

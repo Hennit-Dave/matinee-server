@@ -15,7 +15,7 @@ export const ShowtimeSlotSchema = z.strictObject({
   format: z.string(),
   totalSeats: z.number().int().positive(),
   priceCents: z.number().int().nonnegative(),
-  /** Server-formatted display price (e.g. "$15.50") so the app never computes money. */
+  /** Server-formatted display price (e.g. "£15.50") so the app never computes money. */
   priceFormatted: z.string(),
 });
 export type ShowtimeSlot = z.infer<typeof ShowtimeSlotSchema>;
@@ -62,11 +62,14 @@ export interface ShowtimeService {
   forMovie(movieId: number, from?: Date): Promise<MovieShowtimesResponse>;
 }
 
-/** Formats integer minor units (USD cents) into a finished display string. */
+/**
+ * Formats integer minor units (GBP pence) into a finished display string, e.g. 1550 -> "£15.50".
+ * The field keeps its `priceCents` name (renaming it would need a DB migration); the value is pence.
+ */
 export function formatPriceCents(priceCents: number): string {
-  const dollars = Math.floor(priceCents / 100);
-  const cents = String(priceCents % 100).padStart(2, '0');
-  return `$${dollars}.${cents}`;
+  const pounds = Math.floor(priceCents / 100);
+  const pence = String(priceCents % 100).padStart(2, '0');
+  return `£${pounds}.${pence}`;
 }
 
 /**
