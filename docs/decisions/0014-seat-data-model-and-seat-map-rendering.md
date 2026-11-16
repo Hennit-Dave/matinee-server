@@ -44,3 +44,7 @@ Seat selection is the keystone of the booking flow: holds, the waiting room, pay
 - **Harder:** availability needs a join (bookings) plus Redis for every showtime request once it lands, so that endpoint will be the hot one under the 500-user load test. Its cost is a traffic-slice concern.
 - **Accepted:** the full IMAX response is about 35 KB of JSON (320 seats with ids). Compression is a deployment decision, not made here.
 - **Revisit when:** the traffic slice lands (replace `allSeatsAvailable`), or a screen needs an irregular layout (add `col`).
+
+## Addendum — 2026-11-16: availability is now live (ADR 0015)
+
+The traffic slice replaced `allSeatsAvailable` with a resolver built from bookings and Redis holds, and `status` now takes all three values. One part of Decision 2 is **amended** by [ADR 0015](0015-seat-holds-and-no-double-booking.md): sold seats are read from the **replica**, except for 5 s after the caller's own booking, when they come from the primary (read-your-own-writes, RULES C2). Every authoritative check (taking a hold, confirming a booking) still uses the primary, and held seats still come from Redis, fresh on every request and never cached. Everything else in this decision is unchanged.

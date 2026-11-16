@@ -1,0 +1,35 @@
+# EXPLAIN for the two booking reads. Throwaway Postgres, bookings loaded with 8862 rows (every even-numbered seat of every showtime), ANALYZEd. 2026-11-16T16:57:42Z
+
+## The sold-check made after a hold is taken (8 seats of one showtime): WHERE showtime_id = ? AND seat_id IN (...)
+                                                                                                                                                                                                          QUERY PLAN                                                                                                                                                                                                          
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Bitmap Heap Scan on bookings  (cost=34.36..45.04 rows=3 width=16) (actual time=0.012..0.012 rows=8 loops=1)
+   Recheck Cond: ((showtime_id = '427aa153-6001-4db3-b24a-f078dfbf6092'::uuid) AND (seat_id = ANY ('{b1f65b43-ce71-49c9-82e4-fe7680dd7158,962bee21-a04d-411d-9bb7-f4a2174303cb,44b18cfb-ae9a-4099-aca7-55b720ba9948,0a6e56e6-eb46-49a0-b1b5-8c713a774a5f,9dcac6ea-fb44-4172-9290-1eb6dce0d05f,27d23231-cf5c-4ca6-9079-eaaad7af894b,ce1e38fc-98ac-4b33-86d4-d43e98a6ad5a,80aa46cd-070c-4b2f-8189-0a78ce2d9f41}'::uuid[])))
+   Heap Blocks: exact=1
+   Buffers: shared hit=17
+   ->  Bitmap Index Scan on bookings_showtime_id_seat_id_key  (cost=0.00..34.36 rows=3 width=0) (actual time=0.010..0.010 rows=8 loops=1)
+         Index Cond: ((showtime_id = '427aa153-6001-4db3-b24a-f078dfbf6092'::uuid) AND (seat_id = ANY ('{b1f65b43-ce71-49c9-82e4-fe7680dd7158,962bee21-a04d-411d-9bb7-f4a2174303cb,44b18cfb-ae9a-4099-aca7-55b720ba9948,0a6e56e6-eb46-49a0-b1b5-8c713a774a5f,9dcac6ea-fb44-4172-9290-1eb6dce0d05f,27d23231-cf5c-4ca6-9079-eaaad7af894b,ce1e38fc-98ac-4b33-86d4-d43e98a6ad5a,80aa46cd-070c-4b2f-8189-0a78ce2d9f41}'::uuid[])))
+         Buffers: shared hit=16
+ Planning:
+   Buffers: shared hit=167
+ Planning Time: 0.239 ms
+ Execution Time: 0.026 ms
+(11 rows)
+
+
+## The seat map's sold read (every sold seat of one showtime): WHERE showtime_id = ?
+                                                                 QUERY PLAN                                                                  
+---------------------------------------------------------------------------------------------------------------------------------------------
+ Bitmap Heap Scan on bookings  (cost=9.52..145.30 rows=160 width=16) (actual time=0.014..0.021 rows=160 loops=1)
+   Recheck Cond: (showtime_id = '427aa153-6001-4db3-b24a-f078dfbf6092'::uuid)
+   Heap Blocks: exact=4
+   Buffers: shared hit=8
+   ->  Bitmap Index Scan on bookings_showtime_id_seat_id_key  (cost=0.00..9.48 rows=160 width=0) (actual time=0.011..0.011 rows=160 loops=1)
+         Index Cond: (showtime_id = '427aa153-6001-4db3-b24a-f078dfbf6092'::uuid)
+         Buffers: shared hit=4
+ Planning:
+   Buffers: shared hit=109
+ Planning Time: 0.184 ms
+ Execution Time: 0.039 ms
+(11 rows)
+

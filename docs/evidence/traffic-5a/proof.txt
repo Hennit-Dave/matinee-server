@@ -1,0 +1,49 @@
+# Seat holds: a narrated run. 2026-11-16T16:57:29.758Z
+# Real HTTP app + real Postgres + real (local, throwaway) Redis. 10-minute holds, 5 s read-your-own-writes.
+
+## 1. 100 users ask for the same seat at the same moment, over HTTP (POST /showtimes/:id/holds)
+HTTP statuses: {"201":1,"409":99}
+winning response:  {"showtimeId":"427aa153-6001-4db3-b24a-f078dfbf6092","seatIds":["d635a4ee-d06e-433e-aa63-99665b440e1e"],"expiresAt":"2026-11-16T17:07:29.969Z","expiresInMs":600000}
+a losing response: {"error":{"code":"seat_taken","message":"One or more of those seats are no longer available.","requestId":"15bedba3-876a-42c4-84dd-bf5540e1b77b","seatIds":["d635a4ee-d06e-433e-aa63-99665b440e1e"]}}
+redis  GET hold:{427aa153-6001-4db3-b24a-f078dfbf6092}:d635a4ee-d06e-433e-aa63-99665b440e1e
+       -> 7a1bdb86-cd48-4cf2-b234-c5894f35c7d7   (the winner is 7a1bdb86-cd48-4cf2-b234-c5894f35c7d7: true)
+redis  PTTL -> 599954 ms   (the window is 600000 ms = 10:00)
+seat map says: held
+
+## 2. The winner books it (POST /showtimes/:id/bookings)
+HTTP 201  {"reference":"c5fcb1a8-530d-4a6a-a3ce-5d28c0491b6a","showtimeId":"427aa153-6001-4db3-b24a-f078dfbf6092","seats":[{"seatId":"d635a4ee-d06e-433e-aa63-99665b440e1e","row":"A","number":1}],"priceCents":1850,"totalCents":1850,"totalFormatted":"£18.50"}
+bookings table: 1 row(s)
+  seat d635a4ee-d06e-433e-aa63-99665b440e1e  owner 7a1bdb86-cd48-4cf2-b234-c5894f35c7d7  price_cents 1850  reference c5fcb1a8-530d-4a6a-a3ce-5d28c0491b6a
+seat map says: sold   (sold, even though the hold key still exists: 1)
+a loser tries to book it anyway: HTTP 409 "seat_not_held"
+
+## 3. The database alone refuses a second booking for the same seat
+insert refused. Prisma code: P2002
+  → 72   await stack.db.primary.booking.create( | Unique constraint failed on the constraint: `bookings_showtime_id_seat_id_key`
+rows for the seat afterwards: 1
+
+## 4. Redis taken out of the picture: 50 users confirm the same seat, no hold check at all
+outcomes: {"booked":1,"seat_taken":49}
+rows for the seat: 1   <- the unique key alone, still exactly one
+
+## 5. Redis is down (connection not ready): every route fails closed
+take a hold    HTTP 503  Retry-After: 2  "holds_unavailable"
+release        HTTP 503  Retry-After: 2  "holds_unavailable"
+confirm        HTTP 503  Retry-After: 2  "holds_unavailable"
+seat map       HTTP 503  "service_unavailable"
+bookings written while Redis was down: 0
+Redis back     take a hold -> HTTP 201
+
+## 6. Redis loses Alice's hold between her check and her insert (expiry, a restart, a flush)
+Alice holds the seat and presses Confirm: her hold check passes, then she is paused before the INSERT.
+Her hold key is deleted. Bob takes the seat and books it.
+Alice's INSERT now runs: refused: seat_taken
+rows for the seat: 1, owned by Bob
+
+## 7. Read-your-own-writes, with a replica that never hears about the booking (1.5 s window here)
+Alice booked the seat. The "replica" has no booking row; the primary has 1.
+  an anonymous reader sees   available   (stale replica)
+  Bob (has an id) sees       available   (stale replica)
+  Alice (just booked) sees   sold   (read from the primary)
+  Bob taps it anyway: HTTP 409 "seat_taken"   (the authoritative check is on the primary)
+  after the window, Alice sees available   (back on the replica)
