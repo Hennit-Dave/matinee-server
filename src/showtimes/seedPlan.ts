@@ -1,3 +1,5 @@
+import { buildSeatGrid, type SeatLayout, type SeedSeat } from './seatLayout.js';
+
 export interface SeedCinema {
   id: string;
   name: string;
@@ -10,6 +12,8 @@ export interface SeedScreen {
   name: string;
   format: string;
   totalSeats: number;
+  /** Rows x seats per row. Must multiply out to `totalSeats` (checked when the seat grid is built). */
+  layout: SeatLayout;
 }
 
 export interface SeedShowtime {
@@ -23,6 +27,8 @@ export interface SeedPlan {
   cinemas: readonly SeedCinema[];
   screens: readonly SeedScreen[];
   showtimes: SeedShowtime[];
+  /** Every physical seat of every screen, `sum(totalSeats)` in all. */
+  seats: SeedSeat[];
 }
 
 export const SEED_CINEMAS: readonly SeedCinema[] = [
@@ -34,12 +40,53 @@ export const SEED_CINEMAS: readonly SeedCinema[] = [
 export const LOAD_TEST_SCREEN_ID = 'bfi-southbank-imax';
 
 export const SEED_SCREENS: readonly SeedScreen[] = [
-  { id: 'curzon-soho-1', cinemaId: 'curzon-soho', name: 'Screen 1', format: 'Standard', totalSeats: 120 },
-  { id: 'curzon-soho-2', cinemaId: 'curzon-soho', name: 'Screen 2', format: 'Standard', totalSeats: 84 },
-  { id: LOAD_TEST_SCREEN_ID, cinemaId: 'bfi-southbank', name: 'IMAX', format: 'IMAX', totalSeats: 320 },
-  { id: 'bfi-southbank-nft1', cinemaId: 'bfi-southbank', name: 'NFT1', format: 'Dolby Atmos', totalSeats: 180 },
-  { id: 'prince-charles-main', cinemaId: 'prince-charles', name: 'Main House', format: 'Standard', totalSeats: 140 },
+  {
+    id: 'curzon-soho-1',
+    cinemaId: 'curzon-soho',
+    name: 'Screen 1',
+    format: 'Standard',
+    totalSeats: 120,
+    layout: { rows: 10, seatsPerRow: 12 },
+  },
+  {
+    id: 'curzon-soho-2',
+    cinemaId: 'curzon-soho',
+    name: 'Screen 2',
+    format: 'Standard',
+    totalSeats: 84,
+    layout: { rows: 7, seatsPerRow: 12 },
+  },
+  {
+    // The load-test target (ADR 0014): 16 rows A-P x 20 seats, as in the Figma "300+" seat map.
+    id: LOAD_TEST_SCREEN_ID,
+    cinemaId: 'bfi-southbank',
+    name: 'IMAX',
+    format: 'IMAX',
+    totalSeats: 320,
+    layout: { rows: 16, seatsPerRow: 20 },
+  },
+  {
+    id: 'bfi-southbank-nft1',
+    cinemaId: 'bfi-southbank',
+    name: 'NFT1',
+    format: 'Dolby Atmos',
+    totalSeats: 180,
+    layout: { rows: 10, seatsPerRow: 18 },
+  },
+  {
+    id: 'prince-charles-main',
+    cinemaId: 'prince-charles',
+    name: 'Main House',
+    format: 'Standard',
+    totalSeats: 140,
+    layout: { rows: 10, seatsPerRow: 14 },
+  },
 ];
+
+/** Every seat of every seeded screen. Deterministic, so re-seeding is idempotent. */
+export function buildSeedSeats(screens: readonly SeedScreen[] = SEED_SCREENS): SeedSeat[] {
+  return screens.flatMap((screen) => buildSeatGrid(screen.id, screen.totalSeats, screen.layout));
+}
 
 const DAILY_SLOTS_UTC = [
   { hour: 14, minute: 30, isMatinee: true },
@@ -98,5 +145,6 @@ export function buildSeedPlan(movieIds: readonly number[], anchorDate: Date = ne
     cinemas: SEED_CINEMAS,
     screens: SEED_SCREENS,
     showtimes,
+    seats: buildSeedSeats(SEED_SCREENS),
   };
 }

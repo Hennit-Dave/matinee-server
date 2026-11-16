@@ -1,0 +1,47 @@
+# GET /showtimes/:id/seats against the real API process (src/api/main.ts) on a throwaway local Postgres
+# showtime id = f05aa511-2fd4-4df4-9ebf-29be1349d0f2 (bfi-southbank-imax, movie 900001: a fake id from the integration seed)
+
+## 200 summary of endpoint-imax-seats.json
+{
+  "showtimeId": "f05aa511-2fd4-4df4-9ebf-29be1349d0f2",
+  "movieId": 900001,
+  "startsAt": "2026-11-17T14:30:00.000Z",
+  "time": "14:30",
+  "screen": {
+    "id": "bfi-southbank-imax",
+    "name": "IMAX",
+    "format": "IMAX",
+    "totalSeats": 320
+  },
+  "priceCents": 1850,
+  "priceFormatted": "£18.50",
+  "rows": 16,
+  "seats": 320,
+  "seatsPerRow": [
+    20
+  ],
+  "rowLetters": "ABCDEFGHIJKLMNOP",
+  "wheelchair": [
+    "P1",
+    "P20"
+  ],
+  "statuses": [
+    "available"
+  ]
+}
+
+## HTTP status + size
+HTTP 200, 34713 bytes
+
+## 404: well-formed id that matches no showtime
+{"error":{"code":"not_found","message":"Not found.","requestId":"c2cd5650-452a-4b66-acaa-f3d3804d9adb"}}
+HTTP 404
+
+## 400: malformed id
+{"error":{"code":"validation_failed","message":"The request was not valid.","requestId":"4f06db19-c995-4717-a7a8-0265602402c8","details":[{"path":"params.id","code":"invalid_uuid"}]}}
+HTTP 400
+
+## Request log lines for those three calls
+{"ts":"2026-11-16T11:10:13.674Z","level":"info","msg":"request","requestId":"e346793f-c399-4a86-b637-7533fd5ca209","method":"GET","route":"/showtimes/:id/seats","status":200,"durationMs":2.64,"outcome":"ok"}
+{"ts":"2026-11-16T11:10:13.685Z","level":"warn","msg":"request","requestId":"c2cd5650-452a-4b66-acaa-f3d3804d9adb","method":"GET","route":"/showtimes/:id/seats","status":404,"durationMs":1.06,"outcome":"rejected","errorCode":"not_found"}
+{"ts":"2026-11-16T11:10:13.694Z","level":"warn","msg":"request","requestId":"4f06db19-c995-4717-a7a8-0265602402c8","method":"GET","route":"/showtimes/:id/seats","status":400,"durationMs":0.39,"outcome":"rejected","errorCode":"validation_failed"}

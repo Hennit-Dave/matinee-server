@@ -1,0 +1,34 @@
+# Seats stored per screen (psql, throwaway local Postgres 16 after migration + seats-only seed)
+
+       screen        | total_seats | seats_stored | wheelchair | rows | first_row | last_row 
+---------------------+-------------+--------------+------------+------+-----------+----------
+ bfi-southbank-imax  |         320 |          320 |          2 |   16 | A         | P
+ bfi-southbank-nft1  |         180 |          180 |          2 |   10 | A         | J
+ curzon-soho-1       |         120 |          120 |          2 |   10 | A         | J
+ curzon-soho-2       |          84 |           84 |          2 |    7 | A         | G
+ prince-charles-main |         140 |          140 |          2 |   10 | A         | J
+(5 rows)
+
+ total_seats_in_db | wheelchair 
+-------------------+------------
+               844 |         10
+(1 row)
+
+# Wheelchair spaces in the 320-seat IMAX screen
+ row | number |    kind    
+-----+--------+------------
+ P   |      1 | wheelchair
+ P   |     20 | wheelchair
+(2 rows)
+
+# Seats-only seed proof: before vs after (md5 = checksum of every row's content)
+--- BEFORE (seats table empty, as on Neon right after the migration)
+cinemas=3 md5=0ccb1293b7de514cbcc5e9210ef6c73a
+screens=5 md5=6a13ce77949c1ea3334b6510d66f7220
+showtimes=105 md5=ecf3af619f78703d4e26cf32570cf583
+seats=0
+--- AFTER  seed.ts --seats-only (the entrypoint behind `npm run db:seed -- --seats-only`; run here with DATABASE_URL/DATABASE_READ_URL set inline instead of .env)
+cinemas=3 md5=0ccb1293b7de514cbcc5e9210ef6c73a
+screens=5 md5=6a13ce77949c1ea3334b6510d66f7220
+showtimes=105 md5=ecf3af619f78703d4e26cf32570cf583
+seats=844

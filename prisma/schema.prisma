@@ -30,9 +30,29 @@ model Screen {
   createdAt  DateTime   @default(now()) @map("created_at") @db.Timestamptz(3)
   cinema     Cinema     @relation(fields: [cinemaId], references: [id], onDelete: Cascade)
   showtimes  Showtime[]
+  seats      Seat[]
 
   @@unique([cinemaId, name])
   @@map("screens")
+}
+
+/// A physical seat in a screen. Seats belong to the SCREEN, not to a showtime: the room's chairs do
+/// not change between showings. Per-showtime availability (booked / held) is layered on later from
+/// bookings and Redis holds, never stored here (ADR 0014). The unique key below also serves every
+/// lookup by screen, so it needs no separate index.
+model Seat {
+  id       String @id @default(uuid()) @db.Uuid
+  screenId String @map("screen_id")
+  /// Row letter, "A".."Z". Single letters only, so plain text ordering is the physical order.
+  row      String
+  /// Seat number within the row, 1-based, left to right as seen from the seats.
+  number   Int
+  /// "standard" | "wheelchair". A string like Screen.format; validated by the API's Zod contract.
+  kind     String @default("standard")
+  screen   Screen @relation(fields: [screenId], references: [id], onDelete: Cascade)
+
+  @@unique([screenId, row, number])
+  @@map("seats")
 }
 
 model Showtime {

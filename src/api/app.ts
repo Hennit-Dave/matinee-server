@@ -7,6 +7,8 @@ import { createLogger, recordRouteBase, requestLogger, type Logger } from '../ht
 import { requestIdMiddleware } from '../http/requestId.js';
 import { createGenresRouter, createMoviesRouter } from '../movies/routes.js';
 import type { MovieService } from '../movies/service.js';
+import { createShowtimesRouter } from '../showtimes/seatRoutes.js';
+import type { SeatService } from '../showtimes/seat.js';
 import type { ShowtimeService } from '../showtimes/showtime.js';
 
 export interface AppDeps {
@@ -19,6 +21,8 @@ export interface AppDeps {
    */
   movies?: MovieService;
   showtimes?: ShowtimeService;
+  /** When absent, /showtimes is simply not mounted (same convention as `movies`). */
+  seats?: SeatService;
 }
 
 export function createApp(deps: AppDeps) {
@@ -33,6 +37,10 @@ export function createApp(deps: AppDeps) {
   if (deps.movies) {
     app.use('/movies', createMoviesRouter(deps.movies, deps.showtimes));
     app.use('/genres', createGenresRouter(deps.movies));
+  }
+
+  if (deps.seats) {
+    app.use('/showtimes', createShowtimesRouter(deps.seats));
   }
 
   app.use(notFoundHandler);
