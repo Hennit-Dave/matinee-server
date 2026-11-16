@@ -41,7 +41,7 @@ model Showtime {
   movieId    Int      @map("movie_id")
   screenId   String   @map("screen_id")
   startsAt   DateTime @map("starts_at") @db.Timestamptz(3)
-  /** Ticket price in minor units (whole integer cents, RULES A3). */
+  /** Ticket price in minor units (whole integer pence, GBP; RULES A3). Named `priceCents` for historical reasons; renaming needs a migration. */
   priceCents Int      @map("price_cents")
   createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   screen     Screen   @relation(fields: [screenId], references: [id], onDelete: Cascade)

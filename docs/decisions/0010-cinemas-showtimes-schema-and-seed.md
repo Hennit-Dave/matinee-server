@@ -23,7 +23,7 @@ Slice 4b introduces Matinee's first Postgres tables (`Cinema`, `Screen`, `Showti
    An index `@@index([movieId, startsAt])` keeps per-movie showtime queries fast.
 2. **`priceCents` is a whole integer in minor units; `Screen.totalSeats` holds capacity only; `Screen.format` holds projection/audio format.**
    Follows RULES A3 (no floats/decimals for money). The server formats `priceFormatted` (e.g.
-   `"$15.50"`) so the mobile app never performs money arithmetic. Seat layouts stay out of this slice.
+   `"£15.50"`) so the mobile app never performs money arithmetic. Seat layouts stay out of this slice.
    `Screen.format` (`Standard`, `IMAX`, `Dolby Atmos`) is surfaced on each showtime slot to match the Showtimes design.
 3. **Repeatable, idempotent seed keyed on natural keys (`id` and `(screenId, startsAt)`).**
    - `prisma/schema.prisma` enforces `@@unique([screenId, startsAt])` on `Showtime`.
@@ -44,3 +44,11 @@ Slice 4b introduces Matinee's first Postgres tables (`Cinema`, `Screen`, `Showti
   `prisma migrate deploy` + integration tests against an ephemeral `postgres:17` service container.
 - **Harder:** Developers running migrations locally against Neon must set `DATABASE_DIRECT_URL` in `.env`.
 - **Revisit when:** Seat layouts (`Seat` / `Booking`) land in Slice 5 and reference `Showtime.id`.
+
+## Addendum — 2026-11-16
+
+Display currency is **GBP** (the cinemas are in London). `priceFormatted` renders pounds with a `£` symbol
+(`1550` -> `"£15.50"`). The stored values are unchanged: `priceCents` still holds whole integer minor units
+(pence now, cents before), and no row, seed value or migration changed. The field keeps the name `priceCents`;
+renaming it to `pricePence` would need a database migration and is out of scope. The charge currency for
+payments is recorded in ADR 0001's addendum.

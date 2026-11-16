@@ -8,10 +8,10 @@ import {
 } from './showtime.js';
 
 test('formatPriceCents formats minor units without floating-point drift', () => {
-  assert.equal(formatPriceCents(0), '$0.00');
-  assert.equal(formatPriceCents(1200), '$12.00');
-  assert.equal(formatPriceCents(1550), '$15.50');
-  assert.equal(formatPriceCents(1805), '$18.05');
+  assert.equal(formatPriceCents(0), '£0.00');
+  assert.equal(formatPriceCents(1200), '£12.00');
+  assert.equal(formatPriceCents(1550), '£15.50');
+  assert.equal(formatPriceCents(1805), '£18.05');
 });
 
 test('groupShowtimesByCinemaAndDate returns cinemas: [] when there are no showtimes', () => {
@@ -67,7 +67,7 @@ test('groupShowtimesByCinemaAndDate groups flat rows by cinema -> date -> showti
   assert.equal(grouped.cinemas[0]?.dates[0]?.showtimes.length, 2);
   assert.equal(grouped.cinemas[0]?.dates[0]?.showtimes[0]?.time, '14:30');
   assert.equal(grouped.cinemas[0]?.dates[0]?.showtimes[0]?.format, 'Standard');
-  assert.equal(grouped.cinemas[0]?.dates[0]?.showtimes[0]?.priceFormatted, '$12.00');
+  assert.equal(grouped.cinemas[0]?.dates[0]?.showtimes[0]?.priceFormatted, '£12.00');
   assert.equal(grouped.cinemas[1]?.dates[0]?.showtimes[0]?.format, 'IMAX');
   assert.equal(grouped.cinemas[1]?.dates[0]?.showtimes[0]?.totalSeats, 320);
 });
