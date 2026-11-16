@@ -81,3 +81,25 @@ list of what Expo Go ships:
   build along with the whole table; they do not by themselves trigger it.
 - Nothing about when the first build is spent changes: still the slice that first wires in Stripe's SDK or
   Sentry's native init.
+
+## Addendum — 2026-11-16
+
+`expo-haptics`, which the Decision section above records as "not installed until the slice that first uses
+them", is now installed in `matinee-mobile` and in use. Checked against `matinee-mobile`'s `main` (which includes
+#26) and Expo SDK 58's bundled native modules, the list of what Expo Go ships:
+
+| Module | Version on mobile `main` | First used by | In SDK 58's bundled set |
+|---|---|---|---|
+| `expo-haptics` | `~58.0.8` | the seat-selection screen (seat-selection slice, matinee-mobile #26) | Yes, `~58.0.8` |
+
+- **Installed with `expo install`**, so the version is Expo SDK 58's own pin, not a hand-picked one.
+- **Where it is used.** The seat-selection screen: a light selection tick on every seat pick and every drop,
+  and a warning when the 8-seat cap refuses a pick. The calls go through a shared helper, `src/lib/haptics.ts`
+  in `matinee-mobile`, which other screens will reuse.
+- **No EAS or custom build was needed.** It ships in Expo Go, so development stays Expo-Go-only. Like the
+  other Expo-Go-compatible rows, it is installed by the first EAS Android preview build along with the whole
+  table; it does not by itself trigger it. Nothing about when the first build is spent changes.
+- **Only half of its row is built.** The table's "Needed for" column says seat-select **and** payment-confirm
+  haptics (D2.6). Seat-select is done; the payment-confirm haptic arrives with the payments slice.
+- This supersedes only the Decision section's "not installed until the slice that first uses them" remark for
+  `expo-haptics`. The original decision is unchanged.
