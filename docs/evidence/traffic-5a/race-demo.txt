@@ -1,0 +1,11 @@
+# The double-booking race with no guard, then with the unique constraint. Throwaway local Postgres. 2026-11-16T16:47:44Z
+# Run: RACE_DEMO_URL=postgresql://ci@127.0.0.1:54329/matinee5a node docs/evidence/traffic-5a/race-demo.mjs
+
+50 users, one seat, all at once
+
+race_naive: rows for the one seat = 50
+  outcomes: {"booked":50}
+race_guarded: rows for the one seat = 1
+  outcomes: {"refused by the database (unique violation)":49,"booked":1}
+
+naive check-then-insert sold the seat 50 times; with the unique constraint: 1.
