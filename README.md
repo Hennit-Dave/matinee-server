@@ -10,8 +10,9 @@ The API, background jobs and database behind Matinee, a cinema ticket booking ap
 
 Slice 0: an Express + TypeScript skeleton with a real `/health` (checks Postgres primary + replica
 and Redis, 503 on failure), structured logging, request IDs and a Zod validation helper.
-Slice 1: the movie endpoints below (TMDB through this server, cached in Redis). Showtimes, seats
-and bookings are not built yet. This README is written as the build goes.
+Slice 1: the movie endpoints below (TMDB through this server, cached in Redis). Showtimes and the
+seat map are built (see "Seat map endpoint"); bookings are not built yet. This README is written as
+the build goes.
 
 ## What it is
 
@@ -65,6 +66,21 @@ response header (`HIT`, `MISS` or `STALE`) says where the data came from.
 hours (the list changes about daily), search for 5 minutes (unbounded distinct queries, so keep it
 short); each key is kept for 24 h / 1 h longer than that purely to serve if TMDB is down, so every
 key still expires (27 h and 65 min in Redis).
+
+## Seat map endpoint
+
+| Route | Returns |
+|---|---|
+| `GET /showtimes/:id/seats` | `{ showtimeId, movieId, startsAt, time, screen, priceCents, priceFormatted, rows }`, where `rows` is `[{ row, seats: [{ id, row, number, kind, status }] }]` |
+
+`:id` is a showtime id (the `id` of a slot in `GET /movies/:id/showtimes`). A malformed id is a `400
+validation_failed`, an unknown showtime a `404 not_found`. `priceFormatted` is a finished string
+(`"£18.50"`); the app never does money maths. Seats belong to the screen, and every seat is
+`available` until bookings and holds exist (ADR 0014). The contract is in `src/showtimes/seat.ts`.
+
+After pulling this change, add the table and the seats: `npm run db:migrate`, then
+`npm run db:seed -- --seats-only` (seats only: no TMDB token needed, no showtime or price touched).
+A plain `npm run db:seed` also seeds seats.
 
 ## Docs
 
