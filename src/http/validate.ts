@@ -75,8 +75,8 @@ export function toErrorDetails(error: z.ZodError, scope?: string): ErrorDetail[]
 }
 
 // Codes our own schemas may attach through `ctx.addIssue({ code: 'custom', params: { matinee: ... } })`.
-// Empty for now — grows as routes add custom validation rules.
-const CUSTOM_CODES: ReadonlySet<string> = new Set([]);
+// Grows as routes add custom validation rules. `duplicate_seat`: the same seat id twice in one request.
+const CUSTOM_CODES: ReadonlySet<string> = new Set(['duplicate_seat']);
 
 const NOTHING = z.strictObject({});
 

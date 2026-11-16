@@ -23,6 +23,11 @@ const ALLOWED = [
   'cache',
   'attempt',
   'upstreamStatus',
+  // Traffic slice: who did what to which seats, so "what happened to this user's booking at 3:14pm?"
+  // can be answered from the logs alone (AGENTS.md section 9). `userId` is the caller's client id.
+  'userId',
+  'showtimeId',
+  'seatCount',
 ] as const;
 export type LogField = (typeof ALLOWED)[number];
 export type LogFields = Partial<Record<LogField, string | number | boolean>>;
@@ -97,6 +102,7 @@ export function requestLogger(logger: Logger): RequestHandler {
         durationMs: Math.round((performance.now() - started) * 100) / 100,
         outcome: aborted ? 'aborted' : status >= 500 ? 'error' : status >= 400 ? 'rejected' : 'ok',
       };
+      if (res.locals.userId) fields.userId = String(res.locals.userId);
       if (res.locals.errorCode) fields.errorCode = String(res.locals.errorCode);
       if (res.locals.cache) fields.cache = String(res.locals.cache);
       const level: LogLevel = status >= 500 ? 'error' : status >= 400 ? 'warn' : 'info';
