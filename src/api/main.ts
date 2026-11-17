@@ -1,5 +1,6 @@
 import { createBookingRepo } from '../bookings/bookingRepo.js';
 import { createBookingService } from '../bookings/bookingService.js';
+import { readHoldCaps } from '../bookings/holdCaps.js';
 import { createRedisHoldStore } from '../bookings/holdStore.js';
 import { createRedisRyowStore } from '../bookings/ryow.js';
 import { closeDbClients, createDbClients } from '../db/clients.js';
@@ -42,10 +43,12 @@ const logger = createLogger();
 let port: number;
 let db: ReturnType<typeof createDbClients>;
 let tmdbReadToken: string;
+let holdCaps: ReturnType<typeof readHoldCaps>;
 try {
   port = readPort();
   db = createDbClients();
   tmdbReadToken = readTmdbToken();
+  holdCaps = readHoldCaps();
 } catch (err) {
   logger.error('api_start_failed', { reason: err instanceof Error ? err.message : String(err) });
   process.exit(1);
@@ -64,7 +67,12 @@ const movies = createMovieService({
 });
 const showtimes = createShowtimeService(db);
 const bookingRepo = createBookingRepo(db);
-const holds = createRedisHoldStore(redis);
+// The hold caps (ADR 0018): how many seats of one showing an install, and an address, may hold at once.
+logger.info('hold_caps', { perOwner: holdCaps.caps.perOwner, perAddress: holdCaps.caps.perAddress, profile: holdCaps.profile });
+if (holdCaps.profile === 'loadtest') {
+  logger.warn('traffic_profile_loadtest', { note: 'relaxed traffic limits for a load test; never run production like this' });
+}
+const holds = createRedisHoldStore(redis, { caps: holdCaps.caps });
 const ryow = createRedisRyowStore(redis);
 const seats = createSeatService(db, { repo: bookingRepo, holds, ryow });
 const bookings = createBookingService({ repo: bookingRepo, holds, ryow, logger });
