@@ -1,0 +1,31 @@
+BEFORE: nothing limits how many users are in seat selection at once, and nothing sheds load (traffic slice 5d, PR 2: waiting room and graceful overload)
+
+Code:    branch feat/hold-caps (PR 1: the hold caps), which is main plus the caps. There is no waiting room and no load shedding.
+Server:  the real src/api/main.ts copied into a scratchpad with ONE change (a stub movie source, so no TMDB), over a throwaway Postgres 16 (54329)
+         and Redis (6391). Dave's own Postgres, Redis and API were not touched.
+Probe:   docs/evidence/traffic-5d/waiting-room/probe.mjs (plain HTTP, the same calls the app would make).
+Suite:   unit tests, as CI runs them: ℹ tests 262 ℹ pass 203 ℹ fail 0 ℹ skipped 59 
+
+---- entry: 100 users arrive at one showing and each reads the seat map ----
+100 users arrive at the same showing and each tries to read the seat map
+  join the line:  admitted 0, waiting 0, other 100 (statuses: 404)
+  read the map:   200 100, 403 0, other 0
+  one user: join -> 404 not_found; map -> 200 the map
+
+---- drain: a short line leaving at the fixed rate ----
++  0.0 s  five users join in order: u1 404 not_found; u2 404 not_found; u3 404 not_found; u4 404 not_found; u5 404 not_found
+
+---- lapse: admitted users who go silent ----
++  0.0 s  four users join: u1 404 not_found; u2 404 not_found; u3 404 not_found; u4 404 not_found
+
+---- burst: 80 seat-map requests at the same moment, each from a different install (so the per-install rate limit is not what answers) ----
+80 seat-map requests at the same moment: 80 x 200
+  a request a moment later: 200
+
+READ THIS AS:
+  entry. There is no line: joining is a 404, and all 100 users read the seat map and could go on to hold seats at the same moment. RULES D5.3
+         asks for the opposite: past a limit, new users queue and are admitted at a fixed rate.
+  drain, lapse. Nothing to measure: there is no queue to drain and no pass to lapse.
+  burst. All 80 are served. That is not a sign of protection: the server has no in-flight limit at all, so the 801st concurrent request would be
+         served too, slower and slower, until something upstream (the database pool, Railway) fails in a way the app shows as a crash or a timeout.
+         NOTE: this machine cannot produce a REAL overload, so the after run demonstrates the mechanism with a deliberately small in-flight limit.
