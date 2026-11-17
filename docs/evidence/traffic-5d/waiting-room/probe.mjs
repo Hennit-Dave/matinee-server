@@ -43,20 +43,25 @@ if (mode === 'drain') {
   for (const u of users) states.push(await join(u)); // one after another, so the order is known
   console.log(`${at()}  five users join in order: ${states.map((r, i) => `u${i + 1} ${label(r)}`).join('; ')}`);
   if (states[0].status !== 200) process.exit(0);
-  console.log(`${at()}  u1 and u2 (admitted) leave together: two slots free up`);
+  console.log(`${at()}  u1 and u2 (admitted) leave together: two slots free up, three people are waiting`);
   await Promise.all([leave(users[0]), leave(users[1])]);
-  const admittedAt = {};
-  for (let i = 0; i < 90 && Object.keys(admittedAt).length < 3; i += 1) {
-    for (const [index, u] of users.entries()) {
-      if (index < 2 || admittedAt[index]) continue;
-      const r = await poll(u);
+  const admittedAt = {}; // index -> time
+  let freed = false;
+  for (let i = 0; i < 80 && Object.keys(admittedAt).length < 3; i += 1) {
+    for (const index of [2, 3, 4]) {
+      if (admittedAt[index]) continue;
+      const r = await poll(users[index]);
       if (r.json?.status === 'admitted') { admittedAt[index] = Date.now(); console.log(`${at()}  u${index + 1} is admitted`); }
     }
-    if (admittedAt[2] === undefined && admittedAt[3] !== undefined && i === 20) { console.log(`${at()}  (u5 stays queued: the room is full again; u3 leaves to free a slot)`); await leave(users[2]); }
-    await sleep(300);
+    if (!freed && admittedAt[2] && admittedAt[3]) {
+      freed = true;
+      console.log(`${at()}  the room is full again (u3 and u4 are in), so u5 keeps waiting. u3 leaves to free a slot`);
+      await leave(users[2]);
+    }
+    await sleep(1200); // each waiter polled about every 1.2 s: faster than the app (3 s) but under the per-install rate limit
   }
   const times = Object.entries(admittedAt).sort((a, b) => a[1] - b[1]);
-  if (times.length >= 2) console.log(`  spacing between admissions: ${times.slice(1).map(([, t], i) => `${((t - times[i][1]) / 1000).toFixed(1)} s`).join(', ')}`);
+  if (times.length >= 2) console.log(`  spacing between admissions: ${times.slice(1).map(([index, t], i) => `u${Number(times[i][0]) + 1} to u${Number(index) + 1}: ${((t - times[i][1]) / 1000).toFixed(1)} s`).join(', ')}`);
   await Promise.all(users.map((u) => leave(u)));
 }
 
@@ -71,8 +76,8 @@ if (mode === 'lapse') {
   for (let i = 0; i < 120; i += 1) {
     const r = await poll(waiter);
     if (r.json?.status === 'admitted') { console.log(`${at()}  u3 is admitted: the silent users' passes lapsed and freed the slots`); break; }
-    if (i % 20 === 0) console.log(`${at()}  u3: ${label(r)}`);
-    await sleep(500);
+    if (i % 10 === 0) console.log(`${at()}  u3: ${label(r)}`);
+    await sleep(1200);
   }
   await Promise.all(users.map((u) => leave(u)));
 }

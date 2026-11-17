@@ -81,6 +81,9 @@ validation_failed`, an unknown showtime a `404 not_found`. `priceFormatted` is a
 bookings" below. With Redis unreachable the map is a `503`, not a guess. The contract is in
 `src/showtimes/seat.ts`.
 
+**It needs `X-Client-Id` and, when the waiting room is on, a pass** (see "Waiting room"): without a pass the answer is
+`403 waiting_room_required`, and each map poll is what keeps the pass alive. (`X-Client-Id` used to be optional here.)
+
 After pulling this change, add the table and the seats: `npm run db:migrate`, then
 `npm run db:seed -- --seats-only` (seats only: no TMDB token needed, no showtime or price touched).
 A plain `npm run db:seed` also seeds seats.
@@ -93,7 +96,7 @@ empty, wrong or down.
 
 | Route | Does | Success | Refusals |
 |---|---|---|---|
-| `POST /showtimes/:id/holds` `{ seatIds }` | Holds the seats for **10 minutes**, all or nothing | `201 { showtimeId, seatIds, expiresAt, expiresInMs }` | `409 seat_taken { seatIds }` (the seats it could not get), `409 hold_limit_reached { scope, limit, held }` (see "Hold caps"), `503 holds_unavailable` |
+| `POST /showtimes/:id/holds` `{ seatIds }` | Holds the seats for **10 minutes**, all or nothing | `201 { showtimeId, seatIds, expiresAt, expiresInMs }` | `409 seat_taken { seatIds }` (the seats it could not get), `409 hold_limit_reached { scope, limit, held }` (see "Hold caps"), `403 waiting_room_required` (no pass: see "Waiting room"), `503 holds_unavailable` |
 | `DELETE /showtimes/:id/holds` `{ seatIds }` | Gives back the caller's own holds (owner-checked, idempotent) | `200 { released }` | `503 holds_unavailable` |
 | `POST /showtimes/:id/bookings` `{ seatIds }` | Turns the caller's holds into bookings, priced on the server | `201 { reference, showtimeId, seats, priceCents, totalCents, totalFormatted }` | `409 seat_not_held { seatIds }`, `409 seat_taken { seatIds }`, `503 holds_unavailable` |
 
@@ -132,6 +135,54 @@ Rate limits slow hoarding; these stop it (ADR 0018). Per **showing**, counted in
 - Fails closed with the holds (Redis down is `503 holds_unavailable`). A booking does not release its holds, so they still count for up to 10 minutes.
 - Proof is in `docs/evidence/traffic-5d/hold-caps/`.
 
+## Waiting room
+
+When more people are choosing seats for one showing than the room allows, new arrivals queue and are let in at a fixed rate
+(RULES D5.3; ADR 0017). It gates **entry to seat selection**, per showing.
+
+> **WAITING_ROOM_MAX_ACTIVE MUST BE RAISED FOR PRODUCTION.** It defaults to **2**, a demo value, so the queue can be shown on two or
+> three phones. Left unset on a deployed server, every showing queues everyone behind two people. The server logs a
+> `waiting_room_demo_defaults` warning at boot while it is unset. Set a real figure in the deploy slice (the 5e load test gives it).
+
+| Route | Does |
+|---|---|
+| `POST /showtimes/:id/queue` | Join the line, or be let straight in when there is room. Idempotent: joining again keeps your place. `503 waiting_room_full` past 5,000 waiting |
+| `GET /showtimes/:id/queue` | Where you stand, and a heartbeat for your place. Never joins |
+| `DELETE /showtimes/:id/queue` | Give up a pass or a place. Idempotent; not rate limited |
+
+All three answer `{ status: 'admitted', passExpiresInMs }`, `{ status: 'waiting', ahead, pollAfterMs }` (people ahead of you, `0` = you are
+next; the back of a long line is told to ask less often) or `{ status: 'not_queued' }`. **There is no estimated wait:** a fixed admission rate
+gives only a lower bound, and a time that is often wrong is worse than none.
+
+- **Gated:** `GET /showtimes/:id/seats` and `POST /showtimes/:id/holds` answer `403 waiting_room_required` without a pass. The gate runs after the
+  rate limit and before the body is parsed. **Not gated:** releasing seats, booking (you already hold the seats), `/health`, every other read.
+- **A pass** is membership of the showing's active set. It lasts while the user is heard from within **30 s** (the seat-map polls are the heartbeat),
+  never longer than **20 min** from admission. Someone let in from the queue must show up within **15 s** or the slot goes to the next in line. A closed
+  app frees its slot by itself: no sweeper job.
+- **The line** is first in, first out, and people are let in **one at a time at an even spacing** (`WAITING_ROOM_ADMIT_PER_MINUTE`), as many as there
+  are free slots. A waiter keeps their place for 90 s without polling (a locked phone), then loses it. Someone who still **holds seats** here is let back in
+  ahead of the line.
+- **Fails open.** If the room's own Redis call errors or takes over 150 ms, the user is let through and one `waiting_room_unavailable` warning is
+  logged per 10 s: the opposite of seat holds (which fail closed). Residual risk in ADR 0017: in a partial failure the cap is not enforced.
+- Settings (all optional, names in `.env.example`): `WAITING_ROOM_ENABLED` (default on), `WAITING_ROOM_MAX_ACTIVE` (default **2**, DEMO), `WAITING_ROOM_ADMIT_PER_MINUTE`
+  (default 12). `TRAFFIC_PROFILE=loadtest` turns the room off for the k6 test (slice 5e).
+- **To show it on two or three phones:** start with `WAITING_ROOM_MAX_ACTIVE=1`, open the same showing on each phone. The first is in; the others
+  are "0 people ahead" and "1 person ahead"; when the first leaves, the next is let in within about one admission interval.
+  `docs/evidence/traffic-5d/waiting-room/demo-fill.sh` fills a room with synthetic users so one phone can show a long line counting down.
+
+## Graceful overload
+
+An overloaded server says so quickly instead of piling up work (RULES D5.7; ADR 0017):
+
+- **Load shedding.** More than `MAX_IN_FLIGHT` requests in flight (default 250, chosen not measured) and the next are refused at once with
+  `503 server_busy` and a **jittered `Retry-After` of 5 to 15 s**, so refused clients do not all come back together. Never shed: `GET /health` and every
+  `DELETE` (releasing seats and leaving the line free capacity).
+- **A database that cannot answer** (pool timeout, unreachable: Prisma `P2024`, `P1001`, `P1002`, `P1008`, `P1017`) is the same `503 server_busy`, not a 500.
+- `503 service_unavailable` (the seat map with Redis down) now carries `Retry-After: 5` too, so the app can count down.
+- `MAX_IN_FLIGHT=0` turns shedding off; the load-test profile does.
+
+Proof is in `docs/evidence/traffic-5d/waiting-room/`.
+
 ## Rate limiting
 
 Per install and per address, in Redis, never in memory (RULES C5, D5.4; ADR 0016). A request over a limit is a
@@ -144,6 +195,7 @@ envelope and says nothing about which counter tripped.
 | `hold` | `POST /showtimes/:id/holds` | 10 / min | 40 / min |
 | `booking` | `POST /showtimes/:id/bookings` | 5 / min | 20 / min |
 | `search` | `GET /movies/search` | 60 / min | 180 / min |
+| `queue` | `POST` and `GET /showtimes/:id/queue` (the waiting room) | 60 / min | 600 / min |
 
 - **Sliding window** (the weighted current + previous window), one atomic Lua script per request covering both
   counters. A refused request counts against neither, so hammering cannot extend a lock-out. It is an
@@ -155,7 +207,7 @@ envelope and says nothing about which counter tripped.
 - **The limiter runs before the body is parsed or validated**, right after the client id is read. Not limited:
   `GET /health`, every other read, and `DELETE /showtimes/:id/holds` (releasing seats is the cleanup path; a 429
   there would leave them held for 10 minutes).
-- `X-Client-Id` is optional on search and the seat map: without one, only the address is counted.
+- `X-Client-Id` is optional on search (without one, only the address is counted) and required everywhere else, the seat map included.
 - **Client address behind a proxy**: trusted by address range (loopback, private ranges, `100.64.0.0/10`), not by a
   hop count, because Railway publishes none (`src/http/clientIp.ts`). If only a proxy hop is visible, the address
   counter is skipped and a `client_ip_unresolved` warning is logged. **Not yet verified against the real Railway
