@@ -28,6 +28,10 @@ const ALLOWED = [
   'userId',
   'showtimeId',
   'seatCount',
+  // Rate limiting (ADR 0016): which policy answered and which counter tripped ('user', 'ip', 'user+ip').
+  // Never the address itself: an IP is personal data and the logs do not need it to explain a 429.
+  'policy',
+  'scope',
 ] as const;
 export type LogField = (typeof ALLOWED)[number];
 export type LogFields = Partial<Record<LogField, string | number | boolean>>;
@@ -105,6 +109,8 @@ export function requestLogger(logger: Logger): RequestHandler {
       if (res.locals.userId) fields.userId = String(res.locals.userId);
       if (res.locals.errorCode) fields.errorCode = String(res.locals.errorCode);
       if (res.locals.cache) fields.cache = String(res.locals.cache);
+      if (res.locals.rateLimitPolicy) fields.policy = String(res.locals.rateLimitPolicy);
+      if (res.locals.rateLimitScope) fields.scope = String(res.locals.rateLimitScope);
       const level: LogLevel = status >= 500 ? 'error' : status >= 400 ? 'warn' : 'info';
       logger[level]('request', fields);
     });

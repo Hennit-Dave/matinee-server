@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createApp } from '../api/app.js';
+import { noRateLimit } from '../ratelimit/limiter.js';
 import { ApiError } from '../http/errors.js';
 import { createLogger } from '../http/logger.js';
 import type { BookingService } from './bookingService.js';
@@ -40,6 +41,7 @@ function boot(overrides: Partial<BookingService> = {}) {
     db: {} as never,
     redis: {} as never,
     bookings,
+    rateLimiter: noRateLimit,
   }).listen(0);
   const address = server.address();
   if (!address || typeof address === 'string') throw new Error('no port');
@@ -186,7 +188,7 @@ test('the request log line names the user, so "what happened to this user?" can 
 });
 
 test('without a BookingService the hold routes are simply not mounted', async () => {
-  const server = createApp({ logger: createLogger(() => {}), db: {} as never, redis: {} as never }).listen(0);
+  const server = createApp({ logger: createLogger(() => {}), db: {} as never, redis: {} as never, rateLimiter: noRateLimit }).listen(0);
   try {
     const address = server.address();
     if (!address || typeof address === 'string') throw new Error('no port');

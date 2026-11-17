@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { createApp } from '../api/app.js';
+import { noRateLimit } from '../ratelimit/limiter.js';
 import { createLogger } from '../http/logger.js';
 import { ShowtimeSeatsResponseSchema, buildShowtimeSeatsResponse, type SeatService } from './seat.js';
 import { SEED_SCREENS, buildSeedSeats } from './seedPlan.js';
@@ -39,6 +40,7 @@ function boot() {
     db: {} as never,
     redis: {} as never,
     seats,
+    rateLimiter: noRateLimit,
   }).listen(0);
   const address = server.address();
   if (!address || typeof address === 'string') throw new Error('no port');
@@ -105,7 +107,7 @@ test('GET /showtimes/:id/seats rejects unexpected query parameters (strict valid
 });
 
 test('/showtimes is not mounted when no seat service is given', async () => {
-  const server = createApp({ logger: createLogger(() => {}), db: {} as never, redis: {} as never }).listen(0);
+  const server = createApp({ logger: createLogger(() => {}), db: {} as never, redis: {} as never, rateLimiter: noRateLimit }).listen(0);
   try {
     const address = server.address();
     if (!address || typeof address === 'string') throw new Error('no port');

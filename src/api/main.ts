@@ -7,6 +7,9 @@ import { createLogger } from '../http/logger.js';
 import { createRedisClient } from '../jobs/connection.js';
 import { createMovieCache, createRedisStore } from '../movies/cache.js';
 import { createMovieService } from '../movies/service.js';
+import { createRateLimiter } from '../ratelimit/limiter.js';
+import { RATE_LIMIT_POLICIES } from '../ratelimit/policies.js';
+import { createRedisRateLimitStore } from '../ratelimit/slidingWindow.js';
 import { createTmdbMovieSource } from '../movies/tmdb.js';
 import { createSeatService } from '../showtimes/seatService.js';
 import { createShowtimeService } from '../showtimes/service.js';
@@ -66,7 +69,10 @@ const ryow = createRedisRyowStore(redis);
 const seats = createSeatService(db, { repo: bookingRepo, holds, ryow });
 const bookings = createBookingService({ repo: bookingRepo, holds, ryow, logger });
 
-const app = createApp({ logger, db, redis, movies, showtimes, seats, bookings });
+// Fails open if Redis is down (limiter.ts); the hold store above is the part that fails closed.
+const rateLimiter = createRateLimiter({ store: createRedisRateLimitStore(redis), logger, policies: RATE_LIMIT_POLICIES });
+
+const app = createApp({ logger, db, redis, movies, showtimes, seats, bookings, rateLimiter });
 
 const server = app.listen(port, () => {
   logger.info('api_listening', { port });

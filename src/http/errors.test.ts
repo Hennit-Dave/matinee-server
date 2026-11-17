@@ -87,3 +87,30 @@ test('the traffic-slice codes: two 409s that name the seats, and a retryable 503
   assert.equal(headers['Retry-After'], '2');
   assert.ok(!JSON.stringify(state.body).includes('redis'), 'the internal reason is not sent');
 });
+
+test('rate_limited is a 429 with a Retry-After of whole seconds (never below 1) and no word about which counter tripped', () => {
+  assert.equal(new ApiError('rate_limited').status, 429);
+
+  const handler = createErrorHandler(createLogger(() => {}));
+  const retryAfter = (error: ApiError) => {
+    const headers: Record<string, string> = {};
+    const { res, state } = fakeRes();
+    (res as unknown as { setHeader: (k: string, v: string) => void }).setHeader = (k, v) => {
+      headers[k] = v;
+    };
+    handler(error, {} as never, res, (() => {}) as never);
+    return { header: headers['Retry-After'], state };
+  };
+
+  assert.equal(retryAfter(new ApiError('rate_limited', { retryAfterSeconds: 5 })).header, '5');
+  assert.equal(retryAfter(new ApiError('rate_limited', { retryAfterSeconds: 4.2 })).header, '5', 'rounded up, never down');
+  assert.equal(retryAfter(new ApiError('rate_limited', { retryAfterSeconds: 0 })).header, '1', 'never 0');
+  assert.equal(retryAfter(new ApiError('rate_limited')).header, '1', 'a missing value still gives a usable header');
+
+  const { state } = retryAfter(new ApiError('rate_limited', { retryAfterSeconds: 5, reason: 'scope user+ip' }));
+  assert.equal(state.status, 429);
+  const body = state.body as { error: Record<string, unknown> };
+  assert.equal(body.error.code, 'rate_limited');
+  assert.ok(!('retryAfterSeconds' in body.error), 'the wait is the header, not a body field');
+  assert.ok(!JSON.stringify(body).includes('user+ip'), 'the internal reason is not sent');
+});

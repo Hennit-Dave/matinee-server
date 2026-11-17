@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createApp } from '../api/app.js';
+import { noRateLimit } from '../ratelimit/limiter.js';
 import { closeDbClients, createDbClients } from '../db/clients.js';
 import { createLogger } from '../http/logger.js';
 import { createRedisClient } from '../jobs/connection.js';
@@ -31,7 +32,7 @@ test('GET /health is 200 against real Postgres and Redis', { skip }, async () =>
   const logger = createLogger(() => {});
   const db = createDbClients({ primaryUrl: TEST_DATABASE_URL, readUrl: TEST_DATABASE_READ_URL });
   const redis = createRedisClient(logger, TEST_REDIS_URL);
-  const server = createApp({ logger, db, redis }).listen(0);
+  const server = createApp({ logger, db, redis, rateLimiter: noRateLimit }).listen(0);
   try {
     const { status, body } = await fetchHealth(server);
     assert.equal(status, 200);
@@ -48,7 +49,7 @@ test('GET /health is 503 when Redis is unreachable', { skip }, async () => {
   const db = createDbClients({ primaryUrl: TEST_DATABASE_URL, readUrl: TEST_DATABASE_READ_URL });
   // Nothing listens on this port: proves the real 503 path, not just the unit-test fakes.
   const redis = createRedisClient(logger, 'redis://127.0.0.1:9');
-  const server = createApp({ logger, db, redis }).listen(0);
+  const server = createApp({ logger, db, redis, rateLimiter: noRateLimit }).listen(0);
   try {
     const { status, body } = await fetchHealth(server);
     assert.equal(status, 503);
