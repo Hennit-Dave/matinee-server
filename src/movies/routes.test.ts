@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createApp } from '../api/app.js';
+import { noRateLimit } from '../ratelimit/limiter.js';
 import { ApiError } from '../http/errors.js';
 import { createLogger } from '../http/logger.js';
 import { MAX_QUERY_LENGTH, type MovieDetail, type MoviesPage } from './movie.js';
@@ -115,6 +116,7 @@ async function boot(
     redis: {} as never,
     movies: service,
     showtimes,
+    rateLimiter: noRateLimit,
   }).listen(0);
   const address = server.address();
   if (!address || typeof address === 'string') throw new Error('no port');

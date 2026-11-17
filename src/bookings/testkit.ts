@@ -3,11 +3,14 @@ import { randomUUID } from 'node:crypto';
 import type { Server } from 'node:http';
 import { Client } from 'pg';
 import type { Redis } from 'ioredis';
-import { createApp } from '../api/app.js';
+import { createApp, type AppDeps } from '../api/app.js';
 import { closeDbClients, createDbClients, type DbClients } from '../db/clients.js';
 import { seedDatabase } from '../db/seed.js';
 import { createLogger } from '../http/logger.js';
 import { createRedisClient } from '../jobs/connection.js';
+import { createRateLimiter, noRateLimit, type RateLimiterOptions } from '../ratelimit/limiter.js';
+import { RATE_LIMIT_POLICIES } from '../ratelimit/policies.js';
+import { createRedisRateLimitStore } from '../ratelimit/slidingWindow.js';
 import { createSeatService } from '../showtimes/seatService.js';
 import { LOAD_TEST_SCREEN_ID } from '../showtimes/seedPlan.js';
 import { createBookingRepo, type BookingRepo } from './bookingRepo.js';
@@ -61,6 +64,13 @@ export interface StackOptions {
   connectRedis?: boolean;
   /** Wrap the real hold store (to bypass or interleave its checks in a test). */
   wrapHolds?: (real: HoldStore) => HoldStore;
+  /**
+   * Turn the real rate limiter ON, on this stack's Redis. Off by default: the hold tests send storms from one
+   * address, which is exactly what the limiter exists to refuse. Pass `{}` for the production policies.
+   */
+  rateLimit?: Partial<Pick<RateLimiterOptions, 'policies' | 'clock' | 'opTimeoutMs'>>;
+  /** More of the app to mount (a fake `movies` service, for the search route). */
+  extraDeps?: Partial<Omit<AppDeps, 'logger' | 'db' | 'redis' | 'rateLimiter'>>;
 }
 
 export interface Stack {
@@ -93,7 +103,16 @@ export async function openStack(options: StackOptions = {}): Promise<Stack> {
   const seats = createSeatService(db, { repo, holds, ryow });
   const bookings = createBookingService({ repo, holds, ryow, logger });
 
-  const server = createApp({ logger, db, redis, seats, bookings }).listen(0);
+  const rateLimiter = options.rateLimit
+    ? createRateLimiter({
+        store: createRedisRateLimitStore(redis),
+        logger,
+        policies: RATE_LIMIT_POLICIES,
+        ...options.rateLimit,
+      })
+    : noRateLimit;
+
+  const server = createApp({ logger, db, redis, seats, bookings, rateLimiter, ...options.extraDeps }).listen(0);
   const address = server.address();
   if (!address || typeof address === 'string') throw new Error('no port');
 
@@ -110,6 +129,7 @@ export async function openStack(options: StackOptions = {}): Promise<Stack> {
     async close() {
       await new Promise((resolve) => server.close(resolve));
       await clearTouched(db, redis.status === 'ready' ? redis : undefined);
+      if (options.rateLimit && redis.status === 'ready') await clearRateLimitKeys(redis);
       redis.disconnect();
       await closeDbClients(db);
     },
@@ -154,6 +174,12 @@ export async function freshShowtime(
   await clearShowtime(db, redis, showtime.id);
   touchedShowtimes.add(showtime.id);
   return { showtimeId: showtime.id, seatIds: seats.map((s) => s.id) };
+}
+
+/** Removes the rate-limit counters a test left behind (they expire in two windows on their own; this keeps a rerun clean). */
+export async function clearRateLimitKeys(redis: Redis): Promise<void> {
+  const keys = await redis.keys('rl:*');
+  if (keys.length > 0) await redis.del(...keys);
 }
 
 /** Removes everything a test left for one showtime: its bookings and its hold keys. */

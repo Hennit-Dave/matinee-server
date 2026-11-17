@@ -4,11 +4,13 @@ import type { DbClients } from '../db/clients.js';
 import type { BookingService } from '../bookings/bookingService.js';
 import { createBookingsRouter } from '../bookings/routes.js';
 import { createHealthHandler } from '../health/health.js';
+import { TRUSTED_PROXY_RANGES } from '../http/clientIp.js';
 import { createErrorHandler, notFoundHandler } from '../http/errors.js';
 import { createLogger, recordRouteBase, requestLogger, type Logger } from '../http/logger.js';
 import { requestIdMiddleware } from '../http/requestId.js';
 import { createGenresRouter, createMoviesRouter } from '../movies/routes.js';
 import type { MovieService } from '../movies/service.js';
+import type { RateLimiter } from '../ratelimit/limiter.js';
 import { createShowtimesRouter } from '../showtimes/seatRoutes.js';
 import type { SeatService } from '../showtimes/seat.js';
 import type { ShowtimeService } from '../showtimes/showtime.js';
@@ -27,11 +29,21 @@ export interface AppDeps {
   seats?: SeatService;
   /** Seat holds and bookings, mounted under /showtimes too. When absent those routes are not mounted. */
   bookings?: BookingService;
+  /**
+   * Required, not optional: forgetting it must be a compile error, not a server that silently has no limits
+   * (ADR 0016). Tests that are not about limiting pass `noRateLimit`.
+   */
+  rateLimiter: RateLimiter;
 }
 
 export function createApp(deps: AppDeps) {
   const logger = deps.logger ?? createLogger();
   const app = express();
+  const { limit } = deps.rateLimiter;
+
+  // Behind Railway's proxy the socket address is the proxy's. Trust by address range, not by hop count, so
+  // `req.ip` is the first address from the right that a proxy hop cannot be (src/http/clientIp.ts, ADR 0016).
+  app.set('trust proxy', [...TRUSTED_PROXY_RANGES]);
 
   app.use(recordRouteBase);
   app.use(requestIdMiddleware);
@@ -39,15 +51,15 @@ export function createApp(deps: AppDeps) {
 
   app.get('/health', createHealthHandler(deps.db, deps.redis));
   if (deps.movies) {
-    app.use('/movies', createMoviesRouter(deps.movies, deps.showtimes));
+    app.use('/movies', createMoviesRouter(deps.movies, limit, deps.showtimes));
     app.use('/genres', createGenresRouter(deps.movies));
   }
 
   if (deps.seats) {
-    app.use('/showtimes', createShowtimesRouter(deps.seats));
+    app.use('/showtimes', createShowtimesRouter(deps.seats, limit));
   }
   if (deps.bookings) {
-    app.use('/showtimes', createBookingsRouter(deps.bookings));
+    app.use('/showtimes', createBookingsRouter(deps.bookings, limit));
   }
 
   app.use(notFoundHandler);

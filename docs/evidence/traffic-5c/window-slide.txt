@@ -1,0 +1,32 @@
+limit 10 per 60 s window, one caller. Ten requests at t = 59.0 s (the end of a window) were admitted by both.
+
+  t (s)   sliding window (the limiter)   fixed window (for comparison)
+   60.0   429  Retry-After: 6            admitted   <- the boundary
+   60.5   429  Retry-After: 6            admitted
+   61.0   429  Retry-After: 5            admitted
+   61.5   429  Retry-After: 5            admitted
+   62.0   429  Retry-After: 4            admitted
+   62.5   429  Retry-After: 4            admitted
+   63.0   429  Retry-After: 3            admitted
+   63.5   429  Retry-After: 3            admitted
+   64.0   429  Retry-After: 2            admitted
+   64.5   429  Retry-After: 2            admitted
+   65.0   429  Retry-After: 1            429
+   65.5   429  Retry-After: 1            429
+   66.0   admitted                       429
+   66.5   429  Retry-After: 6            429
+   67.0   429  Retry-After: 5            429
+   67.5   429  Retry-After: 5            429
+   68.0   429  Retry-After: 4            429
+   68.5   429  Retry-After: 4            429
+   69.0   429  Retry-After: 3            429
+   69.5   429  Retry-After: 3            429
+   70.0   429  Retry-After: 2            429
+   70.5   429  Retry-After: 2            429
+   71.0   429  Retry-After: 1            429
+   71.5   429  Retry-After: 1            429
+   72.0   admitted                       429
+
+admitted between t = 59.0 s and t = 65.0 s (a 6 second span):
+  sliding window: 10
+  fixed window:   20   (twice the limit)

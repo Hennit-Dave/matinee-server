@@ -1,6 +1,8 @@
 import { Router, type Response } from 'express';
 import type { z } from 'zod';
+import { clientIdHeader } from '../http/clientId.js';
 import { recordRouteBase } from '../http/logger.js';
+import type { LimitFactory } from '../ratelimit/limiter.js';
 import { validateRequest } from '../http/validate.js';
 import {
   DiscoverQuerySchema,
@@ -29,7 +31,7 @@ function sendWithCache(res: Response, payload: unknown, cache: CacheStatus) {
  * Specific routes (/now-playing, /search, /discover) are registered BEFORE /:id so Express never
  * matches them as a movie id.
  */
-export function createMoviesRouter(service: MovieService, showtimes?: ShowtimeService): Router {
+export function createMoviesRouter(service: MovieService, limit: LimitFactory, showtimes?: ShowtimeService): Router {
   const router = Router();
   router.use(recordRouteBase); // keeps "/movies" in the request log line (see logger.ts)
 
@@ -45,7 +47,9 @@ export function createMoviesRouter(service: MovieService, showtimes?: ShowtimeSe
     sendWithCache(res, result.page, result.cache);
   });
 
-  router.get('/search', validateRequest({ query: SearchQuerySchema }), async (req, res) => {
+  // Search hits TMDB (on a cache miss), so it is limited (ADR 0016). `X-Client-Id` is optional here: with one the
+  // caller is counted per install AND per address, without it per address only.
+  router.get('/search', clientIdHeader({ required: false }), limit('search'), validateRequest({ query: SearchQuerySchema }), async (req, res) => {
     const { query } = req.validated as { query: z.output<typeof SearchQuerySchema> };
     const result = await service.search(query.q, query.page);
     sendWithCache(res, result.page, result.cache);

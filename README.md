@@ -12,8 +12,8 @@ Slice 0: an Express + TypeScript skeleton with a real `/health` (checks Postgres
 and Redis, 503 on failure), structured logging, request IDs and a Zod validation helper.
 Slice 1: the movie endpoints below (TMDB through this server, cached in Redis). Showtimes and the
 seat map are built (see "Seat map endpoint"); seat holds and bookings are built (see "Seat holds and
-bookings"), without payments. This README is written as
-the build goes.
+bookings"), without payments, and rate limiting guards the busy routes (see "Rate limiting"). This README is
+written as the build goes.
 
 ## What it is
 
@@ -112,6 +112,37 @@ empty, wrong or down.
 Proof is in `docs/evidence/traffic-5a/`: the tests, a narrated run (`proof.txt`), five deliberate breakages of
 the guarantee that the tests catch (`mutation-checks.txt`), and the race this prevents (`race-demo.txt`: 50 users,
 one seat, no constraint, sold 50 times).
+
+## Rate limiting
+
+Per install and per address, in Redis, never in memory (RULES C5, D5.4; ADR 0016). A request over a limit is a
+**`429 rate_limited`** with a **`Retry-After`** header in whole seconds (at least 1); the body is the usual error
+envelope and says nothing about which counter tripped.
+
+| Policy | Route | Per install (`X-Client-Id`) | Per address |
+|---|---|---|---|
+| `seatsPoll` | `GET /showtimes/:id/seats` (the map the app polls every ~5 s) | 60 / min | 300 / min |
+| `hold` | `POST /showtimes/:id/holds` | 10 / min | 40 / min |
+| `booking` | `POST /showtimes/:id/bookings` | 5 / min | 20 / min |
+| `search` | `GET /movies/search` | 60 / min | 180 / min |
+
+- **Sliding window** (the weighted current + previous window), one atomic Lua script per request covering both
+  counters. A refused request counts against neither, so hammering cannot extend a lock-out. It is an
+  approximation (worst case about 2x the limit inside one window, for a caller timing bursts to the millisecond);
+  ADR 0016 says why that is fine for abuse limits.
+- **Fails open.** If the limiter's Redis call errors or takes over 150 ms, the request goes through. This is the
+  opposite of seat holds, which fail closed: a limiter protects capacity, a hold protects correctness. With Redis
+  down, holds and bookings still answer `503 holds_unavailable` on their own path.
+- **The limiter runs before the body is parsed or validated**, right after the client id is read. Not limited:
+  `GET /health`, every other read, and `DELETE /showtimes/:id/holds` (releasing seats is the cleanup path; a 429
+  there would leave them held for 10 minutes).
+- `X-Client-Id` is optional on search and the seat map: without one, only the address is counted.
+- **Client address behind a proxy**: trusted by address range (loopback, private ranges, `100.64.0.0/10`), not by a
+  hop count, because Railway publishes none (`src/http/clientIp.ts`). If only a proxy hop is visible, the address
+  counter is skipped and a `client_ip_unresolved` warning is logged. **Not yet verified against the real Railway
+  edge: run `docs/evidence/traffic-5c/verify-client-ip.sh` against the deployed API in the deploy slice.**
+- Every number is chosen, not measured (`src/ratelimit/policies.ts`); the load test (slice 5e) tunes them.
+- No new environment variable, dependency or migration. Proof is in `docs/evidence/traffic-5c/`.
 
 ## Docs
 

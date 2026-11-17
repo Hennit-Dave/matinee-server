@@ -16,7 +16,8 @@ export type ErrorCode =
   | 'upstream_unavailable'
   | 'seat_taken'
   | 'seat_not_held'
-  | 'holds_unavailable';
+  | 'holds_unavailable'
+  | 'rate_limited';
 
 const STATUS: Record<ErrorCode, number> = {
   not_found: 404,
@@ -29,6 +30,7 @@ const STATUS: Record<ErrorCode, number> = {
   seat_taken: 409,
   seat_not_held: 409,
   holds_unavailable: 503,
+  rate_limited: 429,
 };
 
 // Safe English defaults for debugging. The app owns user-facing copy and switches on `code`.
@@ -46,6 +48,8 @@ const MESSAGE: Record<ErrorCode, string> = {
   seat_not_held: 'You do not hold one or more of those seats.',
   // Redis is the seat-hold store; when it cannot be reached we refuse rather than guess (fail closed).
   holds_unavailable: 'Seat reservations are temporarily unavailable. Please try again shortly.',
+  // Traffic slice 5c (ADR 0016). The limiter refuses before the route runs, so nothing was held, booked or searched.
+  rate_limited: 'Too many requests. Please slow down and try again shortly.',
 };
 
 /** Seconds a client should wait before retrying a `holds_unavailable` (sent as `Retry-After`). */
@@ -67,8 +71,13 @@ export class ApiError extends Error {
   readonly seatIds?: string[];
   /** Server-side only: logged, never sent. */
   readonly reason?: string;
+  /** Whole seconds a `rate_limited` caller should wait. Sent as the `Retry-After` header, not in the body. */
+  readonly retryAfterSeconds?: number;
 
-  constructor(code: ErrorCode, options?: { details?: ErrorDetail[]; reason?: string; seatIds?: string[] }) {
+  constructor(
+    code: ErrorCode,
+    options?: { details?: ErrorDetail[]; reason?: string; seatIds?: string[]; retryAfterSeconds?: number },
+  ) {
     super(MESSAGE[code]);
     this.name = 'ApiError';
     this.code = code;
@@ -76,6 +85,7 @@ export class ApiError extends Error {
     this.details = options?.details;
     this.seatIds = options?.seatIds;
     this.reason = options?.reason;
+    this.retryAfterSeconds = options?.retryAfterSeconds;
   }
 }
 
@@ -116,6 +126,10 @@ export function createErrorHandler(logger: Logger): ErrorRequestHandler {
 
     res.locals.errorCode = apiError.code;
     if (apiError.code === 'holds_unavailable') res.setHeader('Retry-After', String(HOLDS_RETRY_AFTER_SECONDS));
+    if (apiError.code === 'rate_limited') {
+      // Always present on a 429 (at least one second), so a client never has to guess how long to wait.
+      res.setHeader('Retry-After', String(Math.max(1, Math.ceil(apiError.retryAfterSeconds ?? 1))));
+    }
     res.status(apiError.status).json({
       error: {
         code: apiError.code,

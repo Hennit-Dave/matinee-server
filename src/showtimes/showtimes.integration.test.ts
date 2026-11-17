@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createApp } from '../api/app.js';
+import { noRateLimit } from '../ratelimit/limiter.js';
 import { closeDbClients, createDbClients } from '../db/clients.js';
 import { seedDatabase } from '../db/seed.js';
 import { createLogger } from '../http/logger.js';
@@ -45,7 +46,7 @@ test('seedDatabase is idempotent and GET /movies/:id/showtimes reads from Postgr
   const db = createDbClients({ primaryUrl: TEST_DATABASE_URL, readUrl: TEST_DATABASE_READ_URL });
   const redis = createRedisClient(logger, process.env.TEST_REDIS_URL ?? 'redis://127.0.0.1:6379');
   const showtimes = createShowtimeService(db);
-  const server = createApp({ logger, db, redis, movies: noopMovies, showtimes }).listen(0);
+  const server = createApp({ logger, db, redis, movies: noopMovies, showtimes, rateLimiter: noRateLimit }).listen(0);
 
   try {
     const anchor = new Date(Date.now() + 24 * 60 * 60 * 1000);

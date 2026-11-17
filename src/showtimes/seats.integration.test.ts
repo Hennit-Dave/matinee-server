@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { createApp } from '../api/app.js';
+import { noRateLimit } from '../ratelimit/limiter.js';
 import { closeDbClients, createDbClients } from '../db/clients.js';
 import { seedDatabase, seedSeats } from '../db/seed.js';
 import { createLogger } from '../http/logger.js';
@@ -34,7 +35,7 @@ test('the seat seed is idempotent and GET /showtimes/:id/seats serves the real s
     holds: createRedisHoldStore(redis),
     ryow: createRedisRyowStore(redis),
   });
-  const server = createApp({ logger, db, redis, seats: seatService }).listen(0);
+  const server = createApp({ logger, db, redis, seats: seatService, rateLimiter: noRateLimit }).listen(0);
   const emptyScreenId = `itest-empty-${randomUUID()}`;
 
   try {

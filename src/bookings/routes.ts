@@ -4,6 +4,7 @@ import { clientIdHeader } from '../http/clientId.js';
 import { jsonBody } from '../http/json.js';
 import { recordRouteBase } from '../http/logger.js';
 import { validateRequest } from '../http/validate.js';
+import type { LimitFactory } from '../ratelimit/limiter.js';
 import { ShowtimeIdParamsSchema } from '../showtimes/seat.js';
 import { SeatIdsBodySchema } from './booking.js';
 import type { BookingService, SeatRequest } from './bookingService.js';
@@ -22,15 +23,14 @@ import type { BookingService, SeatRequest } from './bookingService.js';
  * payment webhook (AGENTS.md section 4); when payments land, that job calls `confirmBooking` and this route is
  * removed. It is mounted only when a `BookingService` is provided.
  */
-export function createBookingsRouter(service: BookingService): Router {
+export function createBookingsRouter(service: BookingService, limit: LimitFactory): Router {
   const router = Router();
   router.use(recordRouteBase); // keeps "/showtimes" in the request log line (see logger.ts)
 
-  const guards = [
-    clientIdHeader({ required: true }),
-    jsonBody(),
-    validateRequest({ params: ShowtimeIdParamsSchema, body: SeatIdsBodySchema }),
-  ];
+  // The order is the point (ADR 0016): who is calling, THEN the rate limit, then the body is parsed and validated.
+  // A flood is refused before it costs a JSON parse or a Zod run.
+  const callerId = clientIdHeader({ required: true });
+  const parsedInput = [jsonBody(), validateRequest({ params: ShowtimeIdParamsSchema, body: SeatIdsBodySchema })];
 
   /** What every handler needs, read only from validated input (never req.body / req.params). */
   function seatRequest(req: { validated?: unknown }, res: Response): SeatRequest {
@@ -46,15 +46,17 @@ export function createBookingsRouter(service: BookingService): Router {
     };
   }
 
-  router.post('/:id/holds', ...guards, async (req, res) => {
+  router.post('/:id/holds', callerId, limit('hold'), ...parsedInput, async (req, res) => {
     res.status(201).json(await service.acquireHolds(seatRequest(req, res)));
   });
 
-  router.delete('/:id/holds', ...guards, async (req, res) => {
+  // Deliberately NOT limited: letting go of seats is the cleanup path (the app releases when the user leaves the
+  // screen), and a 429 here would leave seats held for the full 10 minutes. Owner-only and cheap.
+  router.delete('/:id/holds', callerId, ...parsedInput, async (req, res) => {
     res.json(await service.releaseHolds(seatRequest(req, res)));
   });
 
-  router.post('/:id/bookings', ...guards, async (req, res) => {
+  router.post('/:id/bookings', callerId, limit('booking'), ...parsedInput, async (req, res) => {
     res.status(201).json(await service.confirmBooking(seatRequest(req, res)));
   });
 
