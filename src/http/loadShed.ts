@@ -53,10 +53,16 @@ export function createLoadShedder(options: LoadShedOptions): RequestHandler & { 
       return;
     }
     inFlight += 1;
-    // 'close' fires once whether the response finished or the client went away, so the count cannot leak.
-    res.once('close', () => {
+    // Freed at the EARLIEST of 'finish' (the response has been handed to the network) and 'close' (it finished or the client went away),
+    // exactly once, so the count cannot leak and a client that re-asks the instant it is answered is not counted twice.
+    let freed = false;
+    const free = () => {
+      if (freed) return;
+      freed = true;
       inFlight -= 1;
-    });
+    };
+    res.once('finish', free);
+    res.once('close', free);
     next();
   };
   return Object.assign(handler, { inFlight: () => inFlight });
