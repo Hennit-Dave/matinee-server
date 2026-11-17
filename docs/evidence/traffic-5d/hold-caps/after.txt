@@ -1,0 +1,86 @@
+AFTER: the hold caps, on the finished code (traffic slice 5d, PR 1, branch feat/hold-caps)
+
+Same server, throwaway Postgres 16 and Redis, and the SAME probe as before.txt (docs/evidence/traffic-5d/hold-caps/probe.mjs). The scratch server is
+rebuilt from the branch's own src/api/main.ts (one change: a stub movie source, so no TMDB). Dave's Postgres, Redis and API were not touched.
+
+$ npm run typecheck   -> exit 0
+$ npm run lint        -> exit 0
+$ npm test            -> 262 tests, 203 pass, 0 fail, 59 skipped (unit tests as CI runs them; the skipped are the Redis/Postgres-gated ones)
+                          baseline on main: 224 tests, 182 pass, 42 skipped. New: 38 tests (8 config, 30 unit for the store, service, route and error).
+$ npm run test:integration (throwaway PG + Redis, --test-concurrency=1) -> 60 tests, 60 pass, 0 fail
+                          baseline: 43. New: 17 in holdCaps.integration.test.ts, on a REAL Redis: exact numbers, expiry freeing slots, a release freeing
+                          address slots, 100 simultaneous requests admitting exactly the cap, rollback leaving no index entries, TTL on every key, the HTTP contract.
+$ gitleaks detect (git history) -> no leaks found
+
+Every commit on the branch typechecks and passes the unit suite on its own (checked in a throwaway worktree):
+  26a5bb5 test(holds): baseline for the per-owner and per-address hold caps  typecheck:ok ℹ tests 224 ℹ pass 182 ℹ fail 0 ℹ skipped 42 
+  cdd43e3 feat(traffic): add the TRAFFIC_PROFILE switch and the hold-cap set  typecheck:ok ℹ tests 232 ℹ pass 190 ℹ fail 0 ℹ skipped 42 
+  7c8a5a9 feat(holds): cap live held seats per install and per address  typecheck:ok ℹ tests 262 ℹ pass 203 ℹ fail 0 ℹ skipped 59 
+  (A first run of the second commit's check showed one failing test that did NOT reproduce: a clean worktree at the same commit, and six
+   consecutive runs in the real tree, were all green. I could not identify it; I am recording it rather than hiding it.)
+
+The tests can fail: mutation-checks.txt (13 of 13 deliberate breakages caught; each file restored; 74 of 74 green afterwards). Writing it, one broke the
+first time: breakage 5 (an address-index member counted without checking its hold key) was NOT caught, because the address index expires with the holds.
+I added the two release tests that distinguish it, and it is caught.
+
+================ boot log (the numbers are logged at start) ================
+default:  {"ts":"2026-11-17T21:44:48.602Z","level":"info","msg":"hold_caps","perOwner":8,"perAddress":16,"profile":"default"}
+loadtest: {"ts":"2026-11-17T21:44:48.602Z","level":"info","msg":"hold_caps","perOwner":8,"perAddress":0,"profile":"loadtest"}
+loadtest: {"ts":"2026-11-17T21:44:48.603Z","level":"warn","msg":"traffic_profile_loadtest","note":"relaxed traffic limits for a load test; never run production like this"}
+
+================ probe.mjs, default profile (caps 8 per install, 16 per address) ================
+held before: 0
+
+A. ONE install, 10 requests of 8 different seats each
+   request  1: 201 held
+   request  2: 409 hold_limit_reached (scope owner, limit 8, held 8)
+   request  3: 409 hold_limit_reached (scope owner, limit 8, held 8)
+   request  4: 409 hold_limit_reached (scope owner, limit 8, held 8)
+   request  5: 409 hold_limit_reached (scope owner, limit 8, held 8)
+   request  6: 409 hold_limit_reached (scope owner, limit 8, held 8)
+   request  7: 409 hold_limit_reached (scope owner, limit 8, held 8)
+   request  8: 409 hold_limit_reached (scope owner, limit 8, held 8)
+   request  9: 409 hold_limit_reached (scope owner, limit 8, held 8)
+   request 10: 409 hold_limit_reached (scope owner, limit 8, held 8)
+   seats held on the map now: 8
+   after giving them back: 0
+
+B. ONE address, five different installs (each a new X-Client-Id), 8 seats each
+   install 1: 201 held
+   install 2: 201 held
+   install 3: 409 hold_limit_reached (scope address, limit 16, held 16)
+   install 4: 409 hold_limit_reached (scope address, limit 16, held 16)
+   install 5: 409 hold_limit_reached (scope address, limit 16, held 16)
+   seats held on the map now: 16
+   after giving them back: 0
+
+================ probe.mjs, TRAFFIC_PROFILE=loadtest (a second instance): the ADDRESS cap is lifted, the install cap is not ================
+held before: 0
+
+A. ONE install, 10 requests of 8 different seats each
+   request  1: 201 held
+   request  2: 409 hold_limit_reached (scope owner, limit 8, held 8)
+   request  3: 409 hold_limit_reached (scope owner, limit 8, held 8)
+   request  4: 409 hold_limit_reached (scope owner, limit 8, held 8)
+   request  5: 409 hold_limit_reached (scope owner, limit 8, held 8)
+   request  6: 409 hold_limit_reached (scope owner, limit 8, held 8)
+   request  7: 409 hold_limit_reached (scope owner, limit 8, held 8)
+   request  8: 409 hold_limit_reached (scope owner, limit 8, held 8)
+   request  9: 409 hold_limit_reached (scope owner, limit 8, held 8)
+   request 10: 409 hold_limit_reached (scope owner, limit 8, held 8)
+   seats held on the map now: 8
+   after giving them back: 0
+
+B. ONE address, five different installs (each a new X-Client-Id), 8 seats each
+   install 1: 201 held
+   install 2: 201 held
+   install 3: 201 held
+   install 4: 201 held
+   install 5: 201 held
+   seats held on the map now: 40
+   after giving them back: 0
+
+READ THIS AS:
+  A. One install gets its first 8 seats and every further request is 409 hold_limit_reached (scope owner, limit 8, held 8). Before: 80 seats.
+  B. Two installs behind one address fill its 16; the third, fourth and fifth are refused with scope address. Before: 40 seats from one address.
+  C. The load-test profile lifts only the address cap (five installs hold 40), still caps each install at 8, and logs a loud warning at boot.

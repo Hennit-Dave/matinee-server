@@ -93,7 +93,7 @@ empty, wrong or down.
 
 | Route | Does | Success | Refusals |
 |---|---|---|---|
-| `POST /showtimes/:id/holds` `{ seatIds }` | Holds the seats for **10 minutes**, all or nothing | `201 { showtimeId, seatIds, expiresAt, expiresInMs }` | `409 seat_taken { seatIds }` (the seats it could not get), `503 holds_unavailable` |
+| `POST /showtimes/:id/holds` `{ seatIds }` | Holds the seats for **10 minutes**, all or nothing | `201 { showtimeId, seatIds, expiresAt, expiresInMs }` | `409 seat_taken { seatIds }` (the seats it could not get), `409 hold_limit_reached { scope, limit, held }` (see "Hold caps"), `503 holds_unavailable` |
 | `DELETE /showtimes/:id/holds` `{ seatIds }` | Gives back the caller's own holds (owner-checked, idempotent) | `200 { released }` | `503 holds_unavailable` |
 | `POST /showtimes/:id/bookings` `{ seatIds }` | Turns the caller's holds into bookings, priced on the server | `201 { reference, showtimeId, seats, priceCents, totalCents, totalFormatted }` | `409 seat_not_held { seatIds }`, `409 seat_taken { seatIds }`, `503 holds_unavailable` |
 
@@ -112,6 +112,25 @@ empty, wrong or down.
 Proof is in `docs/evidence/traffic-5a/`: the tests, a narrated run (`proof.txt`), five deliberate breakages of
 the guarantee that the tests catch (`mutation-checks.txt`), and the race this prevents (`race-demo.txt`: 50 users,
 one seat, no constraint, sold 50 times).
+
+## Hold caps
+
+Rate limits slow hoarding; these stop it (ADR 0018). Per **showing**, counted inside the same atomic Redis step that takes the seats:
+
+| Cap | Default | Setting |
+|---|---|---|
+| Live held seats per install (`X-Client-Id`) | **8** (one booking's worth) | `HOLD_CAP_PER_OWNER` |
+| Live held seats per network address | **16** | `HOLD_CAP_PER_ADDRESS` |
+
+- Over a cap the answer is **`409 hold_limit_reached`** with `scope` (`owner` or `address`), `limit` and `held`, and **nothing is held**.
+  No `Retry-After`: releasing seats, or the holds lapsing, is what helps.
+- **A hold that expires frees its slot by itself.** The hold key is the truth; the per-owner and per-address SET indexes only list
+  candidates and are checked against the keys they name, so no timer or cleanup job is needed. Asking again for seats you already hold is free.
+- `0` turns a cap off. `TRAFFIC_PROFILE=loadtest` lifts the **address** cap for the k6 test (slice 5e; 500 users share one address) and logs a
+  `traffic_profile_loadtest` warning at boot. **Never set it in production.**
+- The address is the one the rate limiter counts. If it cannot be resolved the address cap is skipped for that request.
+- Fails closed with the holds (Redis down is `503 holds_unavailable`). A booking does not release its holds, so they still count for up to 10 minutes.
+- Proof is in `docs/evidence/traffic-5d/hold-caps/`.
 
 ## Rate limiting
 
