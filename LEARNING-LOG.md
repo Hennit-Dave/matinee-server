@@ -34,3 +34,7 @@ The app asks my server for movie data so the TMDB key stays out of the mobile ap
 
 What clicked for me was that Redis gives users a fast, temporary hold, but the database's unique constraint is what ultimately prevents two bookings for the same seat. I learned that even if the hold system fails, the database still needs to protect that rule.
 
+## Slice 5c · Rate limiting — fail-open vs fail-closed — 2026-11-17
+
+What clicked for me was that fail-open and fail-closed depend on which mistake would cause more harm. I chose to refuse bookings when holds cannot be checked, but let requests pass when the rate limiter fails so its outage does not block the whole API. That preserves some availability at the cost of temporarily losing throttling, while Postgres still enforces the no-double-booking rule.
+
