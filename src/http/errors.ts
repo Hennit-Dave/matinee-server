@@ -16,6 +16,7 @@ export type ErrorCode =
   | 'upstream_unavailable'
   | 'seat_taken'
   | 'seat_not_held'
+  | 'hold_limit_reached'
   | 'holds_unavailable'
   | 'rate_limited';
 
@@ -29,6 +30,7 @@ const STATUS: Record<ErrorCode, number> = {
   upstream_unavailable: 503,
   seat_taken: 409,
   seat_not_held: 409,
+  hold_limit_reached: 409,
   holds_unavailable: 503,
   rate_limited: 429,
 };
@@ -46,6 +48,8 @@ const MESSAGE: Record<ErrorCode, string> = {
   // Traffic slice (ADR 0015). The two 409s carry `seatIds`: which seats the caller cannot have / does not hold.
   seat_taken: 'One or more of those seats are no longer available.',
   seat_not_held: 'You do not hold one or more of those seats.',
+  // Traffic slice 5d (ADR 0018). Nothing was held. The body also carries `scope`, `limit` and `held`.
+  hold_limit_reached: 'The most seats that can be held for this showing have already been taken.',
   // Redis is the seat-hold store; when it cannot be reached we refuse rather than guess (fail closed).
   holds_unavailable: 'Seat reservations are temporarily unavailable. Please try again shortly.',
   // Traffic slice 5c (ADR 0016). The limiter refuses before the route runs, so nothing was held, booked or searched.
@@ -73,10 +77,18 @@ export class ApiError extends Error {
   readonly reason?: string;
   /** Whole seconds a `rate_limited` caller should wait. Sent as the `Retry-After` header, not in the body. */
   readonly retryAfterSeconds?: number;
+  /** Only on `hold_limit_reached`: which cap was hit (`owner` or `address`), how high it is, and how many seats are held. */
+  readonly holdLimit?: { scope: 'owner' | 'address'; limit: number; held: number };
 
   constructor(
     code: ErrorCode,
-    options?: { details?: ErrorDetail[]; reason?: string; seatIds?: string[]; retryAfterSeconds?: number },
+    options?: {
+      details?: ErrorDetail[];
+      reason?: string;
+      seatIds?: string[];
+      retryAfterSeconds?: number;
+      holdLimit?: { scope: 'owner' | 'address'; limit: number; held: number };
+    },
   ) {
     super(MESSAGE[code]);
     this.name = 'ApiError';
@@ -86,6 +98,7 @@ export class ApiError extends Error {
     this.seatIds = options?.seatIds;
     this.reason = options?.reason;
     this.retryAfterSeconds = options?.retryAfterSeconds;
+    this.holdLimit = options?.holdLimit;
   }
 }
 
@@ -137,6 +150,7 @@ export function createErrorHandler(logger: Logger): ErrorRequestHandler {
         requestId,
         ...(apiError.details ? { details: apiError.details } : {}),
         ...(apiError.seatIds ? { seatIds: apiError.seatIds } : {}),
+        ...(apiError.holdLimit ? apiError.holdLimit : {}),
       },
     });
   };

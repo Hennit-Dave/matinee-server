@@ -32,6 +32,13 @@ const ALLOWED = [
   // Never the address itself: an IP is personal data and the logs do not need it to explain a 429.
   'policy',
   'scope',
+  // Traffic slice 5d: hold caps (ADR 0018), the boot-time numbers, and the profile.
+  'limit',
+  'held',
+  'perOwner',
+  'perAddress',
+  'profile',
+  'note',
 ] as const;
 export type LogField = (typeof ALLOWED)[number];
 export type LogFields = Partial<Record<LogField, string | number | boolean>>;

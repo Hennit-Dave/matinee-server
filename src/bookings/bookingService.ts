@@ -22,6 +22,8 @@ export interface SeatRequest {
   ownerId: string;
   /** Already validated: 1 to 8 unique uuids. */
   seatIds: readonly string[];
+  /** The caller's address key (`resolveClientAddress`), for the per-address hold cap. Absent when it could not be resolved. */
+  address?: string;
   /** For the log line only. */
   requestId?: string;
 }
@@ -68,7 +70,7 @@ export function createBookingService(deps: BookingServiceDeps): BookingService {
       showtimeId: request.showtimeId,
       seatCount: request.seatIds.length,
     };
-    if (error) logger?.warn(event, { ...fields, outcome: 'rejected', errorCode: error.code });
+    if (error) logger?.warn(event, { ...fields, outcome: 'rejected', errorCode: error.code, ...(error.holdLimit ?? {}) });
     else logger?.info(event, { ...fields, outcome: 'ok' });
   }
 
@@ -143,11 +145,15 @@ export function createBookingService(deps: BookingServiceDeps): BookingService {
 
         let acquired;
         try {
-          acquired = await holds.acquire(showtimeId, ownerId, seatIds);
+          acquired = await holds.acquire(showtimeId, ownerId, seatIds, { address: request.address });
         } catch (err) {
           throw unavailable(err, request);
         }
-        if (!acquired.ok) throw new ApiError('seat_taken', { seatIds: acquired.takenSeatIds });
+        if (!acquired.ok) {
+          // The hold caps (ADR 0018) refuse before any seat is touched, so nothing was held either way.
+          if ('limitReached' in acquired) throw new ApiError('hold_limit_reached', { holdLimit: acquired.limitReached });
+          throw new ApiError('seat_taken', { seatIds: acquired.takenSeatIds });
+        }
 
         // Authoritative sold-check, AFTER the hold is ours. The order matters: checking first and holding
         // second would leave a gap in which a booking could commit and its hold lapse, and we would then

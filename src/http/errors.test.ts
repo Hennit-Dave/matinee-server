@@ -114,3 +114,21 @@ test('rate_limited is a 429 with a Retry-After of whole seconds (never below 1) 
   assert.ok(!('retryAfterSeconds' in body.error), 'the wait is the header, not a body field');
   assert.ok(!JSON.stringify(body).includes('user+ip'), 'the internal reason is not sent');
 });
+
+test('hold_limit_reached is a 409 that carries which cap, how high it is and how many seats are held, with no Retry-After', () => {
+  assert.equal(new ApiError('hold_limit_reached').status, 409);
+  const handler = createErrorHandler(createLogger(() => {}));
+  const headers: Record<string, string> = {};
+  const { res, state } = fakeRes();
+  (res as unknown as { setHeader: (k: string, v: string) => void }).setHeader = (k, v) => {
+    headers[k] = v;
+  };
+  handler(new ApiError('hold_limit_reached', { holdLimit: { scope: 'address', limit: 16, held: 16 } }), {} as never, res, (() => {}) as never);
+  const { error } = state.body as { error: Record<string, unknown> };
+  assert.equal(error.code, 'hold_limit_reached');
+  assert.equal(error.scope, 'address');
+  assert.equal(error.limit, 16);
+  assert.equal(error.held, 16);
+  assert.equal('seatIds' in error, false, 'it is about how many, not which seats');
+  assert.deepEqual(headers, {}, 'waiting does not help a cap; releasing seats or the holds lapsing does');
+});

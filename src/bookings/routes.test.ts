@@ -60,7 +60,7 @@ function boot(overrides: Partial<BookingService> = {}) {
 }
 
 const withClient = { 'x-client-id': CLIENT };
-type ErrorBody = { error: { code: string; seatIds?: string[]; details?: { path: string; code: string }[]; requestId: string } };
+type ErrorBody = { error: { code: string; scope?: string; limit?: number; held?: number; seatIds?: string[]; details?: { path: string; code: string }[]; requestId: string } };
 
 test('POST /showtimes/:id/holds takes a hold for the caller (id lower-cased) and answers 201', async () => {
   const app = boot();
@@ -196,5 +196,34 @@ test('without a BookingService the hold routes are simply not mounted', async ()
     assert.equal(res.status, 404);
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
+test('a hold_limit_reached is a 409 with the cap in the body; nothing about it is retryable', async () => {
+  const app = boot({
+    async acquireHolds() {
+      throw new ApiError('hold_limit_reached', { holdLimit: { scope: 'owner', limit: 8, held: 6 } });
+    },
+  });
+  try {
+    const res = await app.send('POST', `/showtimes/${SHOWTIME}/holds`, withClient, { seatIds: [SEAT_1, SEAT_2, SEAT_2.replace('2', '3')] });
+    assert.equal(res.status, 409);
+    assert.equal(res.headers.get('retry-after'), null);
+    const { error } = (await res.json()) as ErrorBody;
+    assert.deepEqual([error.code, error.scope, error.limit, error.held], ['hold_limit_reached', 'owner', 8, 6]);
+  } finally {
+    await app.close();
+  }
+});
+
+test('the caller\'s address (the one the rate limiter counts) reaches the service, so the per-address hold cap can use it', async () => {
+  const app = boot();
+  try {
+    const res = await app.send('POST', `/showtimes/${SHOWTIME}/holds`, withClient, { seatIds: [SEAT_1] });
+    assert.equal(res.status, 201);
+    const request = app.calls[0]!.request as { address?: string };
+    assert.equal(request.address, '127.0.0.1', 'a loopback caller is a real caller in development, so it is counted');
+  } finally {
+    await app.close();
   }
 });

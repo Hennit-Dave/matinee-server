@@ -181,3 +181,66 @@ test('every outcome is logged with the user and showtime, so a booking can be tr
   assert.equal(logs[1]!.seatCount, 1);
   assert.equal(logs[1]!.requestId, 'req-1');
 });
+
+// ---- The hold caps (ADR 0018) ---------------------------------------------------------------------
+
+function capped(caps: { perOwner?: number; perAddress?: number }) {
+  const base = setup();
+  const holds = createFakeHoldStore(undefined, caps);
+  const service = createBookingService({
+    repo: base.repo,
+    holds,
+    ryow: base.ryow,
+    logger: createLogger((line) => base.logs.push(JSON.parse(line) as Record<string, unknown>)),
+    now: () => Date.parse('2026-11-20T20:00:00.000Z'),
+  });
+  return { ...base, holds, service };
+}
+
+test('past the per-owner cap: hold_limit_reached naming the scope, the cap and what is held, and NOTHING more is held', async () => {
+  const { service, holds, logs } = capped({ perOwner: 2 });
+  await service.acquireHolds(req(ALICE, [A1, A2]));
+  const error = await refused(service.acquireHolds(req(ALICE, [B1])));
+  assert.equal(error.code, 'hold_limit_reached');
+  assert.equal(error.status, 409);
+  assert.deepEqual(error.holdLimit, { scope: 'owner', limit: 2, held: 2 });
+  assert.deepEqual([...holds.held(SHOWTIME).keys()].sort(), [A1, A2], 'the refused request held nothing');
+  const line = logs.find((l) => l.msg === 'hold_rejected');
+  assert.deepEqual([line?.errorCode, line?.scope, line?.limit, line?.held], ['hold_limit_reached', 'owner', 2, 2], 'the log can say which cap');
+});
+
+test('asking again for seats you already hold is not "new": it succeeds at the cap', async () => {
+  const { service } = capped({ perOwner: 2 });
+  await service.acquireHolds(req(ALICE, [A1, A2]));
+  assert.deepEqual((await service.acquireHolds(req(ALICE, [A1, A2]))).seatIds, [A1, A2]);
+});
+
+test('releasing frees slots, and one person\'s holds never count against another', async () => {
+  const { service } = capped({ perOwner: 2 });
+  await service.acquireHolds(req(ALICE, [A1, A2]));
+  await service.acquireHolds(req(BOB, [B1])); // Bob is not limited by Alice
+  await service.releaseHolds(req(ALICE, [A1]));
+  assert.deepEqual((await service.acquireHolds(req(ALICE, [A1]))).seatIds, [A1], 'a released seat frees a slot');
+});
+
+test('the address reaches the store, and the per-address cap refuses a second install on the same address', async () => {
+  const { service, holds } = capped({ perAddress: 2 });
+  await service.acquireHolds({ ...req(ALICE, [A1, A2]), address: '203.0.113.9' });
+  assert.deepEqual(holds.addressesSeen, ['203.0.113.9']);
+  const error = await refused(service.acquireHolds({ ...req(BOB, [B1]), address: '203.0.113.9' }));
+  assert.deepEqual(error.holdLimit, { scope: 'address', limit: 2, held: 2 });
+  assert.deepEqual((await service.acquireHolds({ ...req(BOB, [B1]), address: '198.51.100.7' })).seatIds, [B1], 'another address is fine');
+});
+
+test('an address that could not be resolved skips the address cap (off, loudly, never everyone refused)', async () => {
+  const { service, holds } = capped({ perAddress: 1 });
+  await service.acquireHolds(req(ALICE, [A1]));
+  await service.acquireHolds(req(BOB, [A2]));
+  assert.deepEqual(holds.addressesSeen, [undefined, undefined]);
+});
+
+test('the cap does not turn a Redis outage into anything but the usual retryable 503', async () => {
+  const { service, holds } = capped({ perOwner: 2 });
+  holds.down = true;
+  assert.equal((await refused(service.acquireHolds(req(ALICE, [A1])))).code, 'holds_unavailable');
+});

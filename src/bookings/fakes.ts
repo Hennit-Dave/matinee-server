@@ -16,35 +16,60 @@ export interface FakeHoldStore extends HoldStore {
   /** seatId -> owner, for seats currently held. */
   held(showtimeId: string): Map<string, string>;
   calls: string[];
+  /** What each acquire was told about its caller's address (undefined when none). */
+  addressesSeen: (string | undefined)[];
 }
 
-export function createFakeHoldStore(ttlMs = SEAT_HOLD_TTL_MS): FakeHoldStore {
+export function createFakeHoldStore(ttlMs = SEAT_HOLD_TTL_MS, caps: { perOwner?: number; perAddress?: number } = {}): FakeHoldStore {
   const keys = new Map<string, string>();
+  /** key -> the address that took it, for the per-address cap. */
+  const addresses = new Map<string, string>();
   const key = (showtimeId: string, seatId: string) => `${showtimeId}:${seatId}`;
   const store: FakeHoldStore = {
     down: false,
     calls: [],
+    addressesSeen: [],
     held(showtimeId) {
       return new Map(
         [...keys].filter(([k]) => k.startsWith(`${showtimeId}:`)).map(([k, owner]) => [k.slice(showtimeId.length + 1), owner]),
       );
     },
-    async acquire(showtimeId, ownerId, seatIds): Promise<AcquireResult> {
+    async acquire(showtimeId, ownerId, seatIds, context = {}): Promise<AcquireResult> {
       store.calls.push('acquire');
+      store.addressesSeen.push(context.address);
       if (store.down) throw new HoldsUnavailableError('redis not ready (end)');
+      // The caps are judged first, like the real script: seats the owner already holds are not new.
+      const inShowtime = [...keys].filter(([k]) => k.startsWith(`${showtimeId}:`));
+      const fresh = seatIds.filter((id) => keys.get(key(showtimeId, id)) !== ownerId).length;
+      const ownHeld = inShowtime.filter(([, owner]) => owner === ownerId).length;
+      if (caps.perOwner && ownHeld + fresh > caps.perOwner) {
+        return { ok: false, limitReached: { scope: 'owner', limit: caps.perOwner, held: ownHeld } };
+      }
+      if (caps.perAddress && context.address !== undefined) {
+        const atAddress = inShowtime.filter(([k]) => addresses.get(k) === context.address).length;
+        if (atAddress + fresh > caps.perAddress) {
+          return { ok: false, limitReached: { scope: 'address', limit: caps.perAddress, held: atAddress } };
+        }
+      }
       const taken = seatIds.filter((id) => {
         const owner = keys.get(key(showtimeId, id));
         return owner !== undefined && owner !== ownerId;
       });
       if (taken.length > 0) return { ok: false, takenSeatIds: taken };
-      for (const id of seatIds) keys.set(key(showtimeId, id), ownerId);
+      for (const id of seatIds) {
+        keys.set(key(showtimeId, id), ownerId);
+        if (context.address !== undefined) addresses.set(key(showtimeId, id), context.address);
+      }
       return { ok: true, expiresInMs: ttlMs };
     },
     async release(showtimeId, ownerId, seatIds) {
       store.calls.push('release');
       if (store.down) throw new HoldsUnavailableError('redis not ready (end)');
       const freed = seatIds.filter((id) => keys.get(key(showtimeId, id)) === ownerId);
-      for (const id of freed) keys.delete(key(showtimeId, id));
+      for (const id of freed) {
+        keys.delete(key(showtimeId, id));
+        addresses.delete(key(showtimeId, id));
+      }
       return freed;
     },
     async heldBy(showtimeId, ownerId, seatIds) {

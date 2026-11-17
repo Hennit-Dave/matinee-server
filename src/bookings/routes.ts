@@ -1,6 +1,7 @@
 import { Router, type Response } from 'express';
 import type { z } from 'zod';
 import { clientIdHeader } from '../http/clientId.js';
+import { resolveClientAddress } from '../http/clientIp.js';
 import { jsonBody } from '../http/json.js';
 import { recordRouteBase } from '../http/logger.js';
 import { validateRequest } from '../http/validate.js';
@@ -33,14 +34,18 @@ export function createBookingsRouter(service: BookingService, limit: LimitFactor
   const parsedInput = [jsonBody(), validateRequest({ params: ShowtimeIdParamsSchema, body: SeatIdsBodySchema })];
 
   /** What every handler needs, read only from validated input (never req.body / req.params). */
-  function seatRequest(req: { validated?: unknown }, res: Response): SeatRequest {
+  function seatRequest(req: { validated?: unknown; ip: string | undefined }, res: Response): SeatRequest {
     const { params, body } = req.validated as {
       params: z.output<typeof ShowtimeIdParamsSchema>;
       body: z.output<typeof SeatIdsBodySchema>;
     };
+    // The same address the rate limiter counts (ADR 0016). When it cannot be told (a proxy hop showing through), the
+    // per-address hold cap is skipped for this request, exactly like the address rate limit is: "off, loudly", not "everyone refused".
+    const address = resolveClientAddress(req);
     return {
       showtimeId: params.id,
       ownerId: String(res.locals.clientId),
+      address: address.resolved ? address.key : undefined,
       seatIds: body.seatIds,
       requestId: String(res.locals.requestId ?? ''),
     };

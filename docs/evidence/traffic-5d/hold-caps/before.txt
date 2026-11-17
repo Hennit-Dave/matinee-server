@@ -1,0 +1,38 @@
+BEFORE: nothing stops one install, or one address, from holding a room (traffic slice 5d, PR 1: hold caps)
+
+Code:    matinee-server main at 239c545. The 5c rate limiter is in; there is NO cap on live held seats.
+Server:  the real src/api/main.ts copied into a scratchpad with ONE change (a stub movie source, so no TMDB), over a throwaway
+         Postgres 16 (54329) and Redis (6391). Dave's own Postgres, Redis and API were not touched.
+Probe:   docs/evidence/traffic-5d/hold-caps/probe.mjs: plain HTTP, the same calls the app makes. One showing of the 120-seat room.
+Suite:   unit tests on main, as CI runs them (no TEST_* variables): 224 tests, 182 pass, 0 fail, 42 skipped (the Redis/Postgres-gated ones).
+
+held before: 0
+
+A. ONE install, 10 requests of 8 different seats each
+   request  1: 201 held
+   request  2: 201 held
+   request  3: 201 held
+   request  4: 201 held
+   request  5: 201 held
+   request  6: 201 held
+   request  7: 201 held
+   request  8: 201 held
+   request  9: 201 held
+   request 10: 201 held
+   seats held on the map now: 80
+   after giving them back: 0
+
+B. ONE address, five different installs (each a new X-Client-Id), 8 seats each
+   install 1: 201 held
+   install 2: 201 held
+   install 3: 201 held
+   install 4: 201 held
+   install 5: 201 held
+   seats held on the map now: 40
+   after giving them back: 0
+
+READ THIS AS:
+  A. The 5c rate limit allows 10 holds a minute per install and each hold may take 8 seats, so ONE install holds 80 seats
+     (two thirds of this room) for 10 minutes. ADR 0016 recorded this as open for 5d.
+  B. Five installs behind one address each take 8 seats and nothing refuses: 40 seats from one address. Rotating X-Client-Id is free,
+     so the install id is not a boundary; only the address can be.

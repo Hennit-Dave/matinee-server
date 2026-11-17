@@ -1,0 +1,99 @@
+MUTATION CHECKS: can the new tests fail?  (traffic slice 5d, PR 1: hold caps)
+
+Each entry breaks the code in one specific way, runs the tests that should notice (unit + the real-Redis integration tests),
+and restores the file. CAUGHT means they went red and names the tests that noticed. Script: scratchpad only, not committed.
+
+M1 the owner cap is off by one (a 9th seat is allowed)
+   file: src/bookings/holdStore.ts
+   CAUGHT: 7 failing test(s) of 74
+     - an install may hold 8 seats of one showing in one request; the next seat is refused with the cap and what it holds
+     - the cap is on what is held IN TOTAL: 5 then 3 is fine, one more is not, and a request that would cross it holds none of its seats
+     - releasing frees slots: after giving back 3 of 8 the install can take 3 more
+     - A HOLD THAT LAPSES FREES ITS SLOT, with no timer or job: the real TTL decides
+     - 100 simultaneous single-seat requests from ONE install hold exactly 8 seats: the cap is atomic
+     ... and 2 more
+
+M2 an index member counts without checking its hold key (a lapsed hold would still occupy a slot)
+   file: src/bookings/holdStore.ts
+   CAUGHT: 2 failing test(s) of 74
+     - releasing frees slots: after giving back 3 of 8 the install can take 3 more
+     - the cap check comes BEFORE any seat is taken, and an index only ever lists candidates
+
+M3 every requested seat counts as new, even one the owner already holds (asking again at the cap is refused)
+   file: src/bookings/holdStore.ts
+   CAUGHT: 1 failing test(s) of 74
+     - asking again for seats you already hold is not new, even at the cap, and it does not restart their timer
+
+M4 the per-address cap is never checked
+   file: src/bookings/holdStore.ts
+   CAUGHT: 6 failing test(s) of 74
+     - one ADDRESS may hold 16 seats of a showing however many installs it uses: the third install is refused with scope address
+     - an address cap of 0 is off, and a lapsed address hold frees its slot
+     - 100 DIFFERENT installs behind ONE address take exactly 16 seats between them
+     - over HTTP: the 409 carries code, scope, limit and held, and the address cap applies to callers on one address
+     - RELEASING frees the ADDRESS slots too, though the address index is not touched by a release: stale members are never counted
+     ... and 1 more
+
+M5 an address-index member counts without checking its hold key
+   file: src/bookings/holdStore.ts
+   CAUGHT: 2 failing test(s) of 74
+     - RELEASING frees the ADDRESS slots too, though the address index is not touched by a release: stale members are never counted
+     - a seat released by one install and taken by ANOTHER on the same address counts once, for the new owner
+
+M6 the owner index is never given a TTL (it would live forever)
+   file: src/bookings/holdStore.ts
+   CAUGHT: 1 failing test(s) of 74
+     - every index key has a TTL no longer than a hold's (RULES C4): nothing the caps add can live forever
+
+M7 a request refused because a seat is TAKEN still writes the owner index
+   file: src/bookings/holdStore.ts
+   CAUGHT: 1 failing test(s) of 74
+     - a request refused because a seat is TAKEN leaves nothing in the indexes: the owner still has all 8 slots
+
+M8 the scope of a cap refusal is reported the wrong way round
+   file: src/bookings/holdStore.ts
+   CAUGHT: 8 failing test(s) of 74
+     - an install may hold 8 seats of one showing in one request; the next seat is refused with the cap and what it holds
+     - the cap is on what is held IN TOTAL: 5 then 3 is fine, one more is not, and a request that would cross it holds none of its seats
+     - one ADDRESS may hold 16 seats of a showing however many installs it uses: the third install is refused with scope address
+     - an address cap of 0 is off, and a lapsed address hold frees its slot
+     - 100 DIFFERENT installs behind ONE address take exactly 16 seats between them
+     ... and 3 more
+
+M9 the store's default caps are off (0), so a store built without options has no cap
+   file: src/bookings/holdStore.ts
+   CAUGHT: 9 failing test(s) of 74
+     - an install may hold 8 seats of one showing in one request; the next seat is refused with the cap and what it holds
+     - the cap is on what is held IN TOTAL: 5 then 3 is fine, one more is not, and a request that would cross it holds none of its seats
+     - releasing frees slots: after giving back 3 of 8 the install can take 3 more
+     - A HOLD THAT LAPSES FREES ITS SLOT, with no timer or job: the real TTL decides
+     - 100 simultaneous single-seat requests from ONE install hold exactly 8 seats: the cap is atomic
+     ... and 4 more
+
+M10 the service reports a cap refusal as seat_taken
+   file: src/bookings/bookingService.ts
+   CAUGHT: 3 failing test(s) of 74
+     - past the per-owner cap: hold_limit_reached naming the scope, the cap and what is held, and NOTHING more is held
+     - the address reaches the store, and the per-address cap refuses a second install on the same address
+     - over HTTP: the 409 carries code, scope, limit and held, and the address cap applies to callers on one address
+
+M11 the route does not pass the caller's address to the service
+   file: src/bookings/routes.ts
+   CAUGHT: 2 failing test(s) of 74
+     - over HTTP: the 409 carries code, scope, limit and held, and the address cap applies to callers on one address
+     - the caller's address (the one the rate limiter counts) reaches the service, so the per-address hold cap can use it
+
+M12 the error body leaves out which cap was hit
+   file: src/http/errors.ts
+   CAUGHT: 3 failing test(s) of 74
+     - over HTTP: the 409 carries code, scope, limit and held, and the address cap applies to callers on one address
+     - a hold_limit_reached is a 409 with the cap in the body; nothing about it is retryable
+     - hold_limit_reached is a 409 that carries which cap, how high it is and how many seats are held, with no Retry-After
+
+M13 the load-test profile also lifts the per-install cap (it must only lift the address cap)
+   file: src/bookings/holdCaps.ts
+   CAUGHT: 1 failing test(s) of 74
+     - the load-test profile lifts the ADDRESS cap only
+
+13 of 13 caught.
+After restoring every file: 74 tests, 74 passed, 0 failed.

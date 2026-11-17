@@ -62,6 +62,8 @@ export interface StackOptions {
   readUrl?: string;
   /** Leave the Redis client unconnected (the Redis-down test). */
   connectRedis?: boolean;
+  /** Hold caps for this stack's real hold store (ADR 0018). Defaults to the production caps. */
+  holdCaps?: { perOwner?: number; perAddress?: number };
   /** Wrap the real hold store (to bypass or interleave its checks in a test). */
   wrapHolds?: (real: HoldStore) => HoldStore;
   /**
@@ -96,7 +98,7 @@ export async function openStack(options: StackOptions = {}): Promise<Stack> {
   const redis = createRedisClient(logger, TEST_REDIS_URL);
   if (options.connectRedis !== false) await redis.connect();
 
-  const realHolds = createRedisHoldStore(redis, { ttlMs: options.ttlMs, opTimeoutMs: options.opTimeoutMs });
+  const realHolds = createRedisHoldStore(redis, { ttlMs: options.ttlMs, opTimeoutMs: options.opTimeoutMs, caps: options.holdCaps });
   const holds = options.wrapHolds ? options.wrapHolds(realHolds) : realHolds;
   const ryow = createRedisRyowStore(redis, { windowMs: options.ryowWindowMs });
   const repo = createBookingRepo(db);
@@ -185,7 +187,12 @@ export async function clearRateLimitKeys(redis: Redis): Promise<void> {
 /** Removes everything a test left for one showtime: its bookings and its hold keys. */
 export async function clearShowtime(db: DbClients, redis: Redis, showtimeId: string): Promise<void> {
   await db.primary.booking.deleteMany({ where: { showtimeId } });
-  const keys = await redis.keys(holdKey(showtimeId, '*'));
+  const keys = [
+    ...(await redis.keys(holdKey(showtimeId, '*'))),
+    // The hold-cap indexes (ADR 0018) live next to the holds and share their hash tag.
+    ...(await redis.keys(`hold-owner:{${showtimeId}}:*`)),
+    ...(await redis.keys(`hold-addr:{${showtimeId}}:*`)),
+  ];
   if (keys.length > 0) await redis.del(...keys);
 }
 
