@@ -1,0 +1,49 @@
+# A real 429 from the real API process (src/api/main.ts, port 3100) on a throwaway local Postgres and Redis.
+# One install (X-Client-Id 17d87573-0e3d-4818-ab13-2c9dfe63cb62), one address (curl from loopback).
+# Policy hold: 10 per install and 40 per address, per 60 s sliding window.
+
+## 1. Ten hold requests: the first takes a real hold, the other nine repeat it
+request  1: POST /showtimes/:id/holds (2 seats)  -> 201
+request  2: POST /showtimes/:id/holds (2 seats)  -> 201
+request  3: POST /showtimes/:id/holds (2 seats)  -> 201
+request  4: POST /showtimes/:id/holds (2 seats)  -> 201
+request  5: POST /showtimes/:id/holds (2 seats)  -> 201
+request  6: POST /showtimes/:id/holds (2 seats)  -> 201
+request  7: POST /showtimes/:id/holds (2 seats)  -> 201
+request  8: POST /showtimes/:id/holds (2 seats)  -> 201
+request  9: POST /showtimes/:id/holds (2 seats)  -> 201
+request 10: POST /showtimes/:id/holds (2 seats)  -> 201
+(asking again for seats you already hold succeeds and does not restart the timer, ADR 0015: that is why all ten are 201)
+
+## 2. The 11th request: status line, headers, body
+HTTP/1.1 429 Too Many Requests
+X-Request-Id: 7d08ccab-f96a-45b1-ae46-7169670b8cb4
+Retry-After: 23
+Content-Type: application/json; charset=utf-8
+
+{"error":{"code":"rate_limited","message":"Too many requests. Please slow down and try again shortly.","requestId":"7d08ccab-f96a-45b1-ae46-7169670b8cb4"}}
+
+
+## 3. A different install from the same address is not affected by the first install's counter
+other install, POST /holds -> 409  (409 seat_taken from the hold store: those seats are held by the first install. It was NOT 429)
+
+## 4. Not limited, from the install whose hold budget is spent
+GET /health                     -> 200
+DELETE /showtimes/:id/holds     -> 200  (release is the cleanup path: never limited)
+GET /showtimes/:id/seats (map)  -> 200  (its own policy, seatsPoll: 60 per install, 300 per address)
+
+## 5. What Redis holds (every key has a TTL; PTTL in ms, never more than 2 windows = 120000)
+## The address counter says 11, not 12: the refused request wrote to neither counter.
+rl:hold:ip:127.0.0.1:29915387  count=11  pttl=119962
+rl:hold:u:<first-install>:29915387  count=10  pttl=119933
+rl:hold:u:1b1cb023-d31c-4a8c-8045-d133c3b202eb:29915387  count=1  pttl=119945
+rl:seatsPoll:ip:127.0.0.1:29915387  count=1  pttl=119957
+rl:seatsPoll:u:<first-install>:29915387  count=1  pttl=119949
+
+## 6. The server's own request log lines for this run (the address is never in them)
+{"level":"info","msg":"request","requestId":"1faa48e6-76b9-4e78-9236-bf6a5762bbe8","method":"POST","route":"/showtimes/:id/holds","status":201,"durationMs":1.32,"outcome":"ok","userId":"17d87573-0e3d-4818-ab13-2c9dfe63cb62"}
+{"level":"warn","msg":"request","requestId":"7d08ccab-f96a-45b1-ae46-7169670b8cb4","method":"POST","route":"/showtimes/:id/holds","status":429,"durationMs":0.51,"outcome":"rejected","userId":"17d87573-0e3d-4818-ab13-2c9dfe63cb62","errorCode":"rate_limited","policy":"hold","scope":"user"}
+{"level":"warn","msg":"request","requestId":"35ee190b-4331-45a9-a7c0-fa6e30affbc3","method":"POST","route":"/showtimes/:id/holds","status":409,"durationMs":1.35,"outcome":"rejected","userId":"1b1cb023-d31c-4a8c-8045-d133c3b202eb","errorCode":"seat_taken"}
+{"level":"info","msg":"request","requestId":"b1f01e3d-a0cd-43f4-8ded-43f2f0c98d2e","method":"GET","route":"/health","status":200,"durationMs":0.54,"outcome":"ok"}
+{"level":"info","msg":"request","requestId":"93ef64f1-cf85-438e-8f14-c03c2adad810","method":"DELETE","route":"/showtimes/:id/holds","status":200,"durationMs":1.01,"outcome":"ok","userId":"17d87573-0e3d-4818-ab13-2c9dfe63cb62"}
+{"level":"info","msg":"request","requestId":"1342f552-6ec3-478d-9e26-8fdd77d24a34","method":"GET","route":"/showtimes/:id/seats","status":200,"durationMs":2.32,"outcome":"ok","userId":"17d87573-0e3d-4818-ab13-2c9dfe63cb62"}

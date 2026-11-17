@@ -1,0 +1,32 @@
+CAUGHT  (5 failing)  1. fixed window: forget the previous window (weight 0)
+          ✖ THE WINDOW SLIDES: a burst at the end of a window and another just after the boundary is caught (a fixed window lets all 20 through)
+          ✖ a window that is full on its own waits for the boundary and then for the blend to fade (the other Retry-After branch)
+          ✖ the numbers are exact: 10 at the end of a window, refused at +1 s with a 5 s wait, refused until the very millisecond that wait ends
+          ✖ the window slides over HTTP: a burst at the end of one window and another just after the boundary is refused, and it opens when Retry-After says
+CAUGHT  (1 failing)  2. read-then-write: the script only DECIDES, the caller counts in a separate call (the race)
+          ✖ ATOMIC: 200 simultaneous checks over several connections admit exactly the limit, for the user and the address alike
+CAUGHT  (8 failing)  3. count refused requests too (hammering extends the lock-out)
+          ✖ ATOMIC: 200 simultaneous checks over several connections admit exactly the limit, for the user and the address alike
+          ✖ a refused request costs nothing: it writes no counter, so hammering cannot extend a lock-out
+          ✖ a window that is full on its own waits for the boundary and then for the blend to fade (the other Retry-After branch)
+          ✖ property: over thousands of random requests no window ever admits more than max, and no span of one window sees more than 2x max
+CAUGHT  (5 failing)  4. skip the address counter (user only)
+          ✖ a focused app is never blocked, a scraper is: realistic seat-map polling against the production limits
+          ✖ a refusal is a 429 in the usual envelope with Retry-After in whole seconds, and the route never runs
+          ✖ a request that is allowed reaches the route, and the store is asked about the user AND the address, with the policy numbers
+          ✖ user and address are independent over HTTP: either can trip alone, and each is counted wherever the other goes
+CAUGHT  (5 failing)  5. fail CLOSED instead of open
+          ✖ FAIL OPEN: a store that never answers is given up on at the deadline, not waited for
+          ✖ FAIL OPEN: a store that throws lets the request through, and an outage is one warning per interval, not one per request
+          ✖ REDIS CONNECTED BUT NOT ANSWERING: the limiter gives up at its short deadline and lets the request through, never hanging
+          ✖ REDIS DOWN: the limiter fails open (nothing is limited, one warning), while holds and the seat map still fail closed on their own
+CAUGHT  (4 failing)  6. limiter AFTER body parsing and validation (a flood costs a JSON parse and a Zod run)
+          ✖ hold, booking, search and the seat map each refuse past their own limit with Retry-After; release and other reads are never limited
+          ✖ the 11th hold request in a minute from one install is refused with a 429 and a Retry-After (production policy)
+          ✖ the window slides over HTTP: a burst at the end of one window and another just after the boundary is refused, and it opens when Retry-After says
+          ✖ user and address are independent over HTTP: either can trip alone, and each is counted wherever the other goes
+CAUGHT  (1 failing)  7. trust every proxy (`true`): any caller can write its own address
+          ✖ the real app trusts the documented proxy ranges and nothing wider (not `true`, not a hop count)
+
+caught: 7   missed: 0
+tree after restore: 0 modified files in src/

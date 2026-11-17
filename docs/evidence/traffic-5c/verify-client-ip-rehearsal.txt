@@ -1,0 +1,55 @@
+# LOCAL REHEARSAL of verify-client-ip.sh against a stand-in for Railway's edge (edge-rig.mjs). THIS IS NOT RAILWAY.
+# The real run is still owed, in the deploy slice. Real API process (src/api/main.ts), throwaway Postgres and Redis.
+# 'X-Sim-Client' is how the stand-in is told which public address the caller 'has' (one machine has only one real address).
+
+## Stand-in edge mode: replace  (sets X-Forwarded-For to "<caller>, 100.64.7.7", discarding the caller's own)
+
+### spoof, from simulated caller 203.0.113.9 (forged XFF and X-Real-IP on every request)
+target: http://127.0.0.1:3200   mode: spoof   2026-11-17T13:49:05Z
+first 429 at request 41 (expected 41: the hold limit is 40 per address per minute)
+PASS: forged X-Forwarded-For / X-Real-IP did not dodge the address limit.
+  (exit 0)
+
+### share, from a DIFFERENT simulated caller 203.0.113.99, straight after
+target: http://127.0.0.1:3200   mode: share   2026-11-17T13:49:06Z
+one request from this network -> 400
+PASS: not limited. This network has its own bucket (callers are not collapsed onto the edge's address).
+  (exit 0)
+
+### control: share from the SAME caller 203.0.113.9 (must FAIL: same address, same bucket)
+target: http://127.0.0.1:3200   mode: share   2026-11-17T13:49:06Z
+one request from this network -> 429
+FAIL: 429. Either every caller is being counted as one address (collapsed onto the edge), or this network shares a public address with the machine that ran 'spoof' (same carrier NAT? use a genuinely different network).
+  (exit 1)
+
+## Stand-in edge mode: append  (keeps the caller's X-Forwarded-For and appends "<caller>, 100.64.7.7")
+
+### spoof, from simulated caller 203.0.113.9 (forged XFF and X-Real-IP on every request)
+target: http://127.0.0.1:3200   mode: spoof   2026-11-17T13:49:08Z
+first 429 at request 41 (expected 41: the hold limit is 40 per address per minute)
+PASS: forged X-Forwarded-For / X-Real-IP did not dodge the address limit.
+  (exit 0)
+
+### share, from a DIFFERENT simulated caller 203.0.113.99, straight after
+target: http://127.0.0.1:3200   mode: share   2026-11-17T13:49:09Z
+one request from this network -> 400
+PASS: not limited. This network has its own bucket (callers are not collapsed onto the edge's address).
+  (exit 0)
+
+### control: share from the SAME caller 203.0.113.9 (must FAIL: same address, same bucket)
+target: http://127.0.0.1:3200   mode: share   2026-11-17T13:49:09Z
+one request from this network -> 429
+FAIL: 429. Either every caller is being counted as one address (collapsed onto the edge), or this network shares a public address with the machine that ran 'spoof' (same carrier NAT? use a genuinely different network).
+  (exit 1)
+mutated app.ts (trust proxy = true): 1
+
+## NEGATIVE: stand-in edge appends, and the API was deliberately broken to trust every proxy (trust proxy = true)
+
+### spoof (must FAIL: the forged leftmost X-Forwarded-For is believed, so every request is a new caller)
+target: http://127.0.0.1:3201   mode: spoof   2026-11-17T13:49:12Z
+FAIL: 60 requests with forged address headers and fresh install ids, never a 429.
+Either the forged headers are being believed (the address limit can be dodged), or the address counter is not being applied at all
+(look for 'client_ip_unresolved' warnings in the API log: the edge's own address is being seen instead of the caller's).
+  (exit 1)
+
+app.ts restored: 0 modified files in src/

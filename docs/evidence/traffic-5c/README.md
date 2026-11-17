@@ -1,0 +1,14 @@
+# Evidence: slice 5c, rate limiting (ADR 0016)
+
+Everything here ran against a **throwaway local PostgreSQL 16 and Redis 8** on their own ports, with `.env` not loaded. Nothing touched Neon, Railway, or Dave's own local services. The tests refuse any Redis that is not on loopback.
+
+| File | What it shows | Reproduce |
+|---|---|---|
+| `before.txt` (+ `before.ts`) | **Baseline**, recorded on `main` before any limiter existed: the new test is red (the 11th hold request is still a 400), and 700 requests from one install and one address produced **no 429 and no `Retry-After`**. | `npx tsx docs/evidence/traffic-5c/before.ts` on the baseline commit |
+| `429-retry-after.txt` | A **real 429 with `Retry-After`** from the real API process (`src/api/main.ts`): ten hold requests (a real hold, then repeats), the 11th refused with its headers and body; a different install from the same address not refused; release, health and the seat map not limited; the Redis keys with their TTLs (the address counter says 11, not 12: the refused request wrote nothing); the server's own log lines. | commands are in the file's headings |
+| `window-slide.txt` (+ `window-slide.ts`) | **The window slides.** The same traffic against the real script and against a fixed-window counter: ten requests at the end of a window, then one every half second across the boundary. Sliding admits 10 in the 6-second span, fixed admits 20. `Retry-After` is honoured to the second (refused at 60.0 with 6, admitted at 66.0). | `npx tsx docs/evidence/traffic-5c/window-slide.ts` |
+| `mutation-checks.txt` (+ `.sh`) | **The tests can fail.** The limiter broken seven ways (a fixed window, a read-then-write race, counting refused requests, skipping the address counter, failing closed, limiting after validation, trusting every proxy); each is caught by named tests, then restored from git. | `bash docs/evidence/traffic-5c/mutation-checks.sh` (needs the test env and a clean tree) |
+| `verify-client-ip.sh` | The black-box check for the **real Railway edge**. **NOT YET RUN against Railway: it must be run in the deploy slice** (see the header of the script and ADR 0016, open item 1). | `bash verify-client-ip.sh <deployed-url> spoof`, then `... share` from a second network |
+| `verify-client-ip-rehearsal.txt` (+ `edge-rig.mjs`) | A **local rehearsal** of that script against a stand-in for the edge. It is not Railway. It passes when the edge replaces and when it appends, fails the same-address control, and fails when the API is deliberately broken to trust every proxy (`trust proxy = true`). | `edge-rig.mjs` and the commands in the file |
+
+Not here, on purpose: any observation of Railway's real headers (no API is deployed), and any capacity figure (every limit and the 150 ms deadline are chosen, not measured: slice 5e).
