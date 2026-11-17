@@ -1,0 +1,41 @@
+# Baseline (main @ 5ac6163): the new test, then the burst
+
+## node --import tsx --test src/ratelimit/limiter.http.integration.test.ts (red)
+✖ BASELINE: the 11th hold request inside a minute from one install is refused with 429 and Retry-After (47.815792ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 429.297792
+
+✖ failing tests:
+
+test at src/ratelimit/limiter.http.integration.test.ts:1:155
+✖ BASELINE: the 11th hold request inside a minute from one install is refused with 429 and Retry-After (47.815792ms)
+  AssertionError [ERR_ASSERTION]: expected the 11th request to be limited, got statuses 400,400,400,400,400,400,400,400,400,400,400
+  
+  400 !== 429
+  
+      at TestContext.<anonymous> (/Users/blk/Developer/Matinee/matinee-server/src/ratelimit/limiter.http.integration.test.ts:26:12)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1313:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 400,
+    expected: 429,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+## docs/evidence/traffic-5c/before.ts
+npm notice run matinee-server@0.0.0 npx
+npm notice run 'tsx' docs/evidence/traffic-5c/before.ts
+one X-Client-Id, one loopback address, sequential
+POST /showtimes/:id/holds (empty body -> 400): 200 requests in 0.08s -> 400 x200; Retry-After header seen: false
+POST /showtimes/:id/bookings (empty body -> 400): 100 requests in 0.02s -> 400 x100; Retry-After header seen: false
+GET /showtimes/:id/seats (the map): 400 requests in 0.58s -> 200 x400; Retry-After header seen: false
+no 429 anywhere: nothing limits how often one install or one address may call these routes
