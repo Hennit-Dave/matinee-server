@@ -2,10 +2,11 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import type { BookingService } from '../bookings/bookingService.js';
+import { TRUSTED_PROXY_RANGES } from '../http/clientIp.js';
 import { ApiError } from '../http/errors.js';
 import { createLogger } from '../http/logger.js';
 import type { MovieService } from '../movies/service.js';
-import type { RateLimiter } from '../ratelimit/limiter.js';
+import { noRateLimit, type RateLimiter } from '../ratelimit/limiter.js';
 import type { SeatService } from '../showtimes/seat.js';
 import type { ShowtimeService } from '../showtimes/showtime.js';
 import { createApp } from './app.js';
@@ -103,4 +104,13 @@ test('search accepts an optional X-Client-Id and refuses a malformed one before 
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
+});
+
+test('the real app trusts the documented proxy ranges and nothing wider (not `true`, not a hop count)', () => {
+  const app = createApp({ logger: createLogger(() => {}), db: {} as never, redis: {} as never, rateLimiter: noRateLimit });
+  assert.deepEqual(app.get('trust proxy'), [...TRUSTED_PROXY_RANGES]);
+  const trusts = app.get('trust proxy fn') as (address: string, hop: number) => boolean;
+  assert.equal(trusts('100.64.1.1', 0), true, "Railway's hop range");
+  assert.equal(trusts('203.0.113.9', 0), false, 'a public caller is never a proxy, however many hops deep');
+  assert.equal(trusts('203.0.113.9', 5), false);
 });
