@@ -18,7 +18,10 @@ export type ErrorCode =
   | 'seat_not_held'
   | 'hold_limit_reached'
   | 'holds_unavailable'
-  | 'rate_limited';
+  | 'rate_limited'
+  | 'waiting_room_required'
+  | 'waiting_room_full'
+  | 'server_busy';
 
 const STATUS: Record<ErrorCode, number> = {
   not_found: 404,
@@ -33,6 +36,9 @@ const STATUS: Record<ErrorCode, number> = {
   hold_limit_reached: 409,
   holds_unavailable: 503,
   rate_limited: 429,
+  waiting_room_required: 403,
+  waiting_room_full: 503,
+  server_busy: 503,
 };
 
 // Safe English defaults for debugging. The app owns user-facing copy and switches on `code`.
@@ -54,10 +60,32 @@ const MESSAGE: Record<ErrorCode, string> = {
   holds_unavailable: 'Seat reservations are temporarily unavailable. Please try again shortly.',
   // Traffic slice 5c (ADR 0016). The limiter refuses before the route runs, so nothing was held, booked or searched.
   rate_limited: 'Too many requests. Please slow down and try again shortly.',
+  // Traffic slice 5d (ADR 0017). The first means "join the line first"; the two 503s carry a Retry-After.
+  waiting_room_required: 'Join the waiting room before choosing seats for this showing.',
+  waiting_room_full: 'The waiting room is full. Please try again shortly.',
+  server_busy: 'We are very busy right now. Please try again shortly.',
 };
 
 /** Seconds a client should wait before retrying a `holds_unavailable` (sent as `Retry-After`). */
 export const HOLDS_RETRY_AFTER_SECONDS = 2;
+
+/**
+ * `Retry-After` for the other retryable 503s (ADR 0017), so the app can show "Trying again in 0:14" instead of guessing. A shed request
+ * gets its own jittered value (loadShed.ts) so refused clients do not all come back at the same second; these are the defaults.
+ */
+export const BUSY_RETRY_AFTER_SECONDS = 10;
+export const UNAVAILABLE_RETRY_AFTER_SECONDS = 5;
+
+/**
+ * Prisma errors that mean "the database could not serve this right now" (the pool had no free connection in time, the server was not
+ * reachable, a query timed out) rather than "the app has a bug". They are overload, so they answer `503 server_busy`, never a 500.
+ * Matched on the error's `code` so this file does not import Prisma.
+ */
+const TRANSIENT_DATABASE_CODES = new Set(['P1001', 'P1002', 'P1008', 'P1017', 'P2024']);
+export function isTransientDatabaseError(err: unknown): boolean {
+  const code = typeof err === 'object' && err !== null ? (err as { code?: unknown }).code : undefined;
+  return typeof code === 'string' && TRANSIENT_DATABASE_CODES.has(code);
+}
 
 /** One field-level problem. Never carries the submitted value. */
 export interface ErrorDetail {
@@ -128,9 +156,14 @@ export function createErrorHandler(logger: Logger): ErrorRequestHandler {
     }
 
     const requestId = String(res.locals.requestId ?? '');
-    const apiError: ApiError = err instanceof ApiError ? err : fromBodyParserError(err) ?? new ApiError('internal_error');
+    const busy = !(err instanceof ApiError) && isTransientDatabaseError(err);
+    const apiError: ApiError = err instanceof ApiError
+      ? err
+      : fromBodyParserError(err) ?? (busy ? new ApiError('server_busy', { reason: err instanceof Error ? err.message : String(err) }) : new ApiError('internal_error'));
 
-    if (!(err instanceof ApiError) && !fromBodyParserError(err)) {
+    if (busy) {
+      logger.warn('database_busy', { requestId, reason: err instanceof Error ? err.message : String(err) });
+    } else if (!(err instanceof ApiError) && !fromBodyParserError(err)) {
       // Unexpected: log for us, tell the caller nothing about it.
       logger.error('unhandled_error', { requestId, reason: err instanceof Error ? err.message : String(err) });
     } else if (apiError.reason) {
@@ -139,6 +172,10 @@ export function createErrorHandler(logger: Logger): ErrorRequestHandler {
 
     res.locals.errorCode = apiError.code;
     if (apiError.code === 'holds_unavailable') res.setHeader('Retry-After', String(HOLDS_RETRY_AFTER_SECONDS));
+    if (apiError.code === 'service_unavailable') res.setHeader('Retry-After', String(UNAVAILABLE_RETRY_AFTER_SECONDS));
+    if (apiError.code === 'server_busy' || apiError.code === 'waiting_room_full') {
+      res.setHeader('Retry-After', String(Math.max(1, Math.ceil(apiError.retryAfterSeconds ?? BUSY_RETRY_AFTER_SECONDS))));
+    }
     if (apiError.code === 'rate_limited') {
       // Always present on a 429 (at least one second), so a client never has to guess how long to wait.
       res.setHeader('Retry-After', String(Math.max(1, Math.ceil(apiError.retryAfterSeconds ?? 1))));

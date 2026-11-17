@@ -1,4 +1,4 @@
-import { Router, type Response } from 'express';
+import { Router, type RequestHandler, type Response } from 'express';
 import type { z } from 'zod';
 import { clientIdHeader } from '../http/clientId.js';
 import { resolveClientAddress } from '../http/clientIp.js';
@@ -24,7 +24,7 @@ import type { BookingService, SeatRequest } from './bookingService.js';
  * payment webhook (AGENTS.md section 4); when payments land, that job calls `confirmBooking` and this route is
  * removed. It is mounted only when a `BookingService` is provided.
  */
-export function createBookingsRouter(service: BookingService, limit: LimitFactory): Router {
+export function createBookingsRouter(service: BookingService, limit: LimitFactory, gate: RequestHandler = (_req, _res, next) => next()): Router {
   const router = Router();
   router.use(recordRouteBase); // keeps "/showtimes" in the request log line (see logger.ts)
 
@@ -51,7 +51,9 @@ export function createBookingsRouter(service: BookingService, limit: LimitFactor
     };
   }
 
-  router.post('/:id/holds', callerId, limit('hold'), ...parsedInput, async (req, res) => {
+  // Holding seats needs a waiting-room pass (ADR 0017), checked BEFORE the body is parsed so a flood without one is cheap to refuse.
+  // Not gated: releasing (the cleanup path) and booking (you already hold the seats, which needed the pass).
+  router.post('/:id/holds', callerId, limit('hold'), gate, ...parsedInput, async (req, res) => {
     res.status(201).json(await service.acquireHolds(seatRequest(req, res)));
   });
 

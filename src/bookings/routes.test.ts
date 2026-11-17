@@ -151,7 +151,7 @@ test('a seat_taken carries the seat ids in the error body, with the usual envelo
   }
 });
 
-test('holds_unavailable is a 503 with Retry-After, and a plain 503 does not get one', async () => {
+test('holds_unavailable is a 503 with Retry-After 2, and a plain service_unavailable now carries one too (5), so the app can count down', async () => {
   const app = boot({
     async acquireHolds() {
       throw new ApiError('holds_unavailable', { reason: 'redis not ready (end)' });
@@ -167,7 +167,8 @@ test('holds_unavailable is a 503 with Retry-After, and a plain 503 does not get 
     assert.equal(((await down.json()) as ErrorBody).error.code, 'holds_unavailable');
 
     const other = await app.send('DELETE', `/showtimes/${SHOWTIME}/holds`, withClient, { seatIds: [SEAT_1] });
-    assert.equal(other.headers.get('retry-after'), null);
+    assert.equal(other.status, 503);
+    assert.equal(other.headers.get('retry-after'), '5');
   } finally {
     await app.close();
   }

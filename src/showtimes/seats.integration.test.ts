@@ -25,6 +25,9 @@ const skip =
 const FAKE_MOVIE_IDS = [900001, 900002, 900003];
 const TOTAL_SEATS = SEED_SCREENS.reduce((sum, s) => sum + s.totalSeats, 0);
 
+/** The seat map needs `X-Client-Id` (slice 5d, ADR 0017). */
+const CLIENT = { 'x-client-id': '0a11ce00-0000-4000-8000-000000000001' };
+
 test('the seat seed is idempotent and GET /showtimes/:id/seats serves the real seat map from Postgres', { skip }, async () => {
   const logger = createLogger(() => {});
   const db = createDbClients({ primaryUrl: TEST_DATABASE_URL, readUrl: TEST_DATABASE_READ_URL });
@@ -78,7 +81,7 @@ test('the seat seed is idempotent and GET /showtimes/:id/seats serves the real s
     const imaxShowtime = await db.primary.showtime.findFirstOrThrow({
       where: { screenId: LOAD_TEST_SCREEN_ID, movieId: FAKE_MOVIE_IDS[0] },
     });
-    const res = await fetch(`${base}/showtimes/${imaxShowtime.id}/seats`);
+    const res = await fetch(`${base}/showtimes/${imaxShowtime.id}/seats`, { headers: CLIENT });
     assert.equal(res.status, 200);
     const body = ShowtimeSeatsResponseSchema.parse(await res.json());
     assert.equal(body.showtimeId, imaxShowtime.id);
@@ -95,7 +98,7 @@ test('the seat seed is idempotent and GET /showtimes/:id/seats serves the real s
     assert.ok(body.priceFormatted.startsWith('£'));
 
     // --- Unknown showtime: 404. A screen whose seats have not been seeded yet: honest empty map. --
-    const missing = await fetch(`${base}/showtimes/${randomUUID()}/seats`);
+    const missing = await fetch(`${base}/showtimes/${randomUUID()}/seats`, { headers: CLIENT });
     assert.equal(missing.status, 404);
     assert.equal(((await missing.json()) as { error: { code: string } }).error.code, 'not_found');
 
@@ -105,7 +108,7 @@ test('the seat seed is idempotent and GET /showtimes/:id/seats serves the real s
     const unseeded = await db.primary.showtime.create({
       data: { movieId: FAKE_MOVIE_IDS[0]!, screenId: emptyScreenId, startsAt: new Date(Date.now() + 3600_000), priceCents: 1200 },
     });
-    const emptyRes = await fetch(`${base}/showtimes/${unseeded.id}/seats`);
+    const emptyRes = await fetch(`${base}/showtimes/${unseeded.id}/seats`, { headers: CLIENT });
     assert.equal(emptyRes.status, 200);
     const emptyBody = ShowtimeSeatsResponseSchema.parse(await emptyRes.json());
     assert.deepEqual(emptyBody.rows, [], 'no seats yet is rows: [], with totalSeats still reported');

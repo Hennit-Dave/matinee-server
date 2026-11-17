@@ -77,6 +77,11 @@ export function createFakeHoldStore(ttlMs = SEAT_HOLD_TTL_MS, caps: { perOwner?:
       if (store.down) throw new HoldsUnavailableError('redis not ready (end)');
       return seatIds.filter((id) => keys.get(key(showtimeId, id)) === ownerId);
     },
+    async heldCount(showtimeId, ownerId) {
+      store.calls.push('heldCount');
+      if (store.down) throw new HoldsUnavailableError('redis not ready (end)');
+      return [...keys].filter(([k, owner]) => k.startsWith(`${showtimeId}:`) && owner === ownerId).length;
+    },
     async heldAmong(showtimeId, seatIds) {
       store.calls.push('heldAmong');
       if (store.down) throw new HoldsUnavailableError('redis not ready (end)');

@@ -42,7 +42,8 @@ function refusal(result: PromiseSettledResult<unknown>): ApiError {
 }
 
 async function seatStatuses(stack: Stack, showtimeId: string, client?: string): Promise<Map<string, string>> {
-  const res = await fetch(`${stack.base}/showtimes/${showtimeId}/seats`, client ? { headers: { 'x-client-id': client } } : undefined);
+  // The seat map needs X-Client-Id (slice 5d, ADR 0017): a caller who names no one is a fresh, anonymous viewer.
+  const res = await fetch(`${stack.base}/showtimes/${showtimeId}/seats`, { headers: { 'x-client-id': client ?? randomUUID() } });
   assert.equal(res.status, 200);
   const body = ShowtimeSeatsResponseSchema.parse(await res.json());
   return new Map(body.rows.flatMap((r) => r.seats).map((s) => [s.id, s.status]));
@@ -461,7 +462,7 @@ test('Redis not ready: every hold route fails closed with a retryable 503, the s
     assert.equal(book.status, 503);
     assert.equal(await stack.db.primary.booking.count({ where: { showtimeId } }), 0, 'nothing was booked while Redis was down');
 
-    const map = await fetch(`${stack.base}/showtimes/${showtimeId}/seats`);
+    const map = await fetch(`${stack.base}/showtimes/${showtimeId}/seats`, { headers: { 'x-client-id': randomUUID() } });
     assert.equal(map.status, 503, 'we do not present a seat map we cannot verify');
 
     await stack.redis.connect();
