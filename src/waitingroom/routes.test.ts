@@ -10,6 +10,7 @@ import type { SeatService } from '../showtimes/seat.js';
 import { QueueStateSchema, type QueueState } from './queue.js';
 import type { RoomState, WaitingRoomStore } from './store.js';
 import { createWaitingRoom, type WaitingRoom } from './waitingRoom.js';
+import { testFetch } from '../http/testFetch.js';
 
 const SHOWTIME = '11111111-1111-4111-8111-111111111111';
 const SEAT = 'aaaaaaa1-aaaa-4aaa-8aaa-aaaaaaaaaaa1';
@@ -50,7 +51,7 @@ function bootQueue(state?: QueueState | { status: 'full' }, exists = async (id: 
   return { ...serve(app), calls, policies };
 }
 
-const call = (base: string, method: string, path: string, headers: Record<string, string> | null = CLIENT) => fetch(`${base}${path}`, { method, headers: headers ?? {} });
+const call = (base: string, method: string, path: string, headers: Record<string, string> | null = CLIENT) => testFetch(`${base}${path}`, { method, headers: headers ?? {} });
 
 test('POST /showtimes/:id/queue answers 200 with a state the schema accepts: admitted, or waiting with people ahead and a poll interval', async () => {
   for (const state of [{ status: 'admitted', passExpiresInMs: 30_000 }, { status: 'waiting', ahead: 4, pollAfterMs: 3000 }] as const) {
@@ -173,7 +174,7 @@ function bootGated(hasPass: boolean, refuseWith?: ApiError) {
   return { ...serve(app), touched, served };
 }
 
-const post = (base: string, path: string, body: string) => fetch(`${base}${path}`, { method: 'POST', headers: { ...CLIENT, 'content-type': 'application/json' }, body });
+const post = (base: string, path: string, body: string) => testFetch(`${base}${path}`, { method: 'POST', headers: { ...CLIENT, 'content-type': 'application/json' }, body });
 
 test('GATED: the seat map and taking a hold need a pass; without one the answer is 403 and the service is never asked', async () => {
   const app = bootGated(false);
@@ -201,7 +202,7 @@ test('the gate runs BEFORE the body is parsed: a flood without a pass is refused
 test('NOT gated: releasing seats and booking (you already hold the seats, which needed the pass)', async () => {
   const app = bootGated(false);
   try {
-    const release = await fetch(`${app.base}/showtimes/${SHOWTIME}/holds`, { method: 'DELETE', headers: { ...CLIENT, 'content-type': 'application/json' }, body: JSON.stringify({ seatIds: [SEAT] }) });
+    const release = await testFetch(`${app.base}/showtimes/${SHOWTIME}/holds`, { method: 'DELETE', headers: { ...CLIENT, 'content-type': 'application/json' }, body: JSON.stringify({ seatIds: [SEAT] }) });
     assert.equal(release.status, 200);
     const book = await post(app.base, `/showtimes/${SHOWTIME}/bookings`, JSON.stringify({ seatIds: [SEAT] }));
     assert.equal(book.status, 409, 'it reached the booking service, which said seat_not_held');

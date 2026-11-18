@@ -5,6 +5,7 @@ import { noRateLimit } from '../ratelimit/limiter.js';
 import { ApiError } from '../http/errors.js';
 import { createLogger } from '../http/logger.js';
 import type { BookingService } from './bookingService.js';
+import { testFetch } from '../http/testFetch.js';
 
 const SHOWTIME = '11111111-1111-4111-8111-111111111111';
 const SEAT_1 = 'aaaaaaa1-aaaa-4aaa-8aaa-aaaaaaaaaaa1';
@@ -50,7 +51,7 @@ function boot(overrides: Partial<BookingService> = {}) {
     calls,
     logs,
     send: (method: string, path: string, headers: Record<string, string> | null, body?: unknown) =>
-      fetch(`${base}${path}`, {
+      testFetch(`${base}${path}`, {
         method,
         headers: { 'content-type': 'application/json', ...(headers ?? {}) },
         body: body === undefined ? undefined : JSON.stringify(body),
@@ -193,7 +194,7 @@ test('without a BookingService the hold routes are simply not mounted', async ()
   try {
     const address = server.address();
     if (!address || typeof address === 'string') throw new Error('no port');
-    const res = await fetch(`http://127.0.0.1:${address.port}/showtimes/${SHOWTIME}/holds`, { method: 'POST' });
+    const res = await testFetch(`http://127.0.0.1:${address.port}/showtimes/${SHOWTIME}/holds`, { method: 'POST' });
     assert.equal(res.status, 404);
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));

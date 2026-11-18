@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { freshShowtime, openStack, ownerId, skip, type Stack } from '../bookings/testkit.js';
 import { QueueStateSchema, type QueueState } from './queue.js';
+import { testFetch } from '../http/testFetch.js';
 
 /**
  * The waiting room over HTTP, on the full real stack: real Postgres, real Redis, the real gate in front of the real seat map and holds
@@ -12,7 +13,7 @@ const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve,
 
 function api(stack: Stack, showtimeId: string) {
   const send = (method: string, path: string, client: string | null, body?: unknown) =>
-    fetch(`${stack.base}/showtimes/${showtimeId}${path}`, {
+    testFetch(`${stack.base}/showtimes/${showtimeId}${path}`, {
       method,
       headers: { 'content-type': 'application/json', ...(client ? { 'x-client-id': client } : {}) },
       body: body === undefined ? undefined : JSON.stringify(body),
@@ -153,7 +154,7 @@ test('X-Client-Id is required on the queue and on the seat map; a showing that d
     assert.equal((await a.join('') as { status: number }).status, 400);
 
     const ghost = '99999999-9999-4999-8999-999999999999';
-    const res = await fetch(`${stack.base}/showtimes/${ghost}/queue`, { method: 'POST', headers: { 'x-client-id': ownerId() } });
+    const res = await testFetch(`${stack.base}/showtimes/${ghost}/queue`, { method: 'POST', headers: { 'x-client-id': ownerId() } });
     assert.equal(res.status, 404);
     assert.deepEqual(await stack.redis.keys(`wr:*:{${ghost}}`), []);
   } finally {

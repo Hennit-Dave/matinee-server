@@ -5,6 +5,7 @@ import type { Server } from 'node:http';
 import { createErrorHandler } from './errors.js';
 import { createLoadShedder, readMaxInFlight } from './loadShed.js';
 import { createLogger } from './logger.js';
+import { testFetch } from './testFetch.js';
 
 function boot(maxInFlight: number, random = () => 0) {
   const logs: Record<string, unknown>[] = [];
@@ -45,11 +46,11 @@ async function until(condition: () => boolean, what: string, timeoutMs = 5_000):
 test('past the limit a request is refused AT ONCE with 503 server_busy and a Retry-After, while the others still finish', async () => {
   const app = boot(2);
   try {
-    const first = fetch(`${app.base}/slow`);
-    const second = fetch(`${app.base}/slow`);
+    const first = testFetch(`${app.base}/slow`);
+    const second = testFetch(`${app.base}/slow`);
     await until(() => app.shed.inFlight() === 2, 'two requests in flight');
 
-    const shed = await fetch(`${app.base}/slow`);
+    const shed = await testFetch(`${app.base}/slow`);
     assert.equal(shed.status, 503);
     assert.equal(shed.headers.get('retry-after'), '5', 'random() = 0 gives the shortest wait');
     const body = (await shed.json()) as { error: { code: string } };
@@ -68,9 +69,9 @@ test('the Retry-After is JITTERED between 5 and 15 s, so refused clients do not 
   for (const [random, expected] of [[0, '5'], [0.5, '10'], [0.999, '15']] as const) {
     const app = boot(1, () => random);
     try {
-      const held = fetch(`${app.base}/slow`);
+      const held = testFetch(`${app.base}/slow`);
       await until(() => app.shed.inFlight() === 1, 'one request in flight');
-      assert.equal((await fetch(`${app.base}/slow`)).headers.get('retry-after'), expected);
+      assert.equal((await testFetch(`${app.base}/slow`)).headers.get('retry-after'), expected);
       app.release();
       await held;
     } finally {
@@ -82,12 +83,12 @@ test('the Retry-After is JITTERED between 5 and 15 s, so refused clients do not 
 test('the count goes back down: once the slow requests finish, new ones are served again', async () => {
   const app = boot(1);
   try {
-    const held = fetch(`${app.base}/slow`);
+    const held = testFetch(`${app.base}/slow`);
     await until(() => app.shed.inFlight() === 1, 'one request in flight');
     app.release();
     await held;
     await until(() => app.shed.inFlight() === 0, 'the slot to be freed');
-    const next = fetch(`${app.base}/slow`);
+    const next = testFetch(`${app.base}/slow`);
     await until(() => app.shed.inFlight() === 1, 'the next request in flight');
     app.release();
     assert.equal((await next).status, 200);
@@ -100,7 +101,7 @@ test('a client that goes away mid-request does not leak a slot', async () => {
   const app = boot(1);
   try {
     const controller = new AbortController();
-    const aborted = fetch(`${app.base}/slow`, { signal: controller.signal }).catch(() => undefined);
+    const aborted = testFetch(`${app.base}/slow`, { signal: controller.signal }).catch(() => undefined);
     await until(() => app.shed.inFlight() === 1, 'one request in flight');
     controller.abort();
     await aborted;
@@ -113,11 +114,11 @@ test('a client that goes away mid-request does not leak a slot', async () => {
 test('NEVER shed: /health and every DELETE (the cleanup paths), even when full', async () => {
   const app = boot(1);
   try {
-    const held = fetch(`${app.base}/slow`);
+    const held = testFetch(`${app.base}/slow`);
     await until(() => app.shed.inFlight() === 1, 'one request in flight');
-    assert.equal((await fetch(`${app.base}/slow`)).status, 503, 'the room is full');
-    assert.equal((await fetch(`${app.base}/health`)).status, 200);
-    assert.equal((await fetch(`${app.base}/holds`, { method: 'DELETE' })).status, 200);
+    assert.equal((await testFetch(`${app.base}/slow`)).status, 503, 'the room is full');
+    assert.equal((await testFetch(`${app.base}/health`)).status, 200);
+    assert.equal((await testFetch(`${app.base}/holds`, { method: 'DELETE' })).status, 200);
     app.release();
     await held;
   } finally {
@@ -128,7 +129,7 @@ test('NEVER shed: /health and every DELETE (the cleanup paths), even when full',
 test('a limit of 0 means no shedding at all', async () => {
   const app = boot(0);
   try {
-    const many = Array.from({ length: 6 }, () => fetch(`${app.base}/slow`));
+    const many = Array.from({ length: 6 }, () => testFetch(`${app.base}/slow`));
     await until(() => app.gates.length === 6, 'six requests waiting');
     app.release();
     assert.ok((await Promise.all(many)).every((r) => r.status === 200));
