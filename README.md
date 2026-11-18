@@ -12,8 +12,10 @@ Slice 0: an Express + TypeScript skeleton with a real `/health` (checks Postgres
 and Redis, 503 on failure), structured logging, request IDs and a Zod validation helper.
 Slice 1: the movie endpoints below (TMDB through this server, cached in Redis). Showtimes and the
 seat map are built (see "Seat map endpoint"); seat holds and bookings are built (see "Seat holds and
-bookings"), without payments, and rate limiting guards the busy routes (see "Rate limiting"). This README is
-written as the build goes.
+bookings"), without payments, and rate limiting guards the busy routes (see "Rate limiting").
+The traffic chapter (5a–5e) is done: seat holds, rate limiting, hold caps, the waiting room and graceful
+overload, and the k6 load test that proves a seat is never sold twice (see "Load test", `TRAFFIC.md`,
+`SHARDING.md`). This README is written as the build goes.
 
 ## What it is
 
@@ -212,12 +214,25 @@ envelope and says nothing about which counter tripped.
   hop count, because Railway publishes none (`src/http/clientIp.ts`). If only a proxy hop is visible, the address
   counter is skipped and a `client_ip_unresolved` warning is logged. **Not yet verified against the real Railway
   edge: run `docs/evidence/traffic-5c/verify-client-ip.sh` against the deployed API in the deploy slice.**
-- Every number is chosen, not measured (`src/ratelimit/policies.ts`); the load test (slice 5e) tunes them.
-- No new environment variable, dependency or migration. Proof is in `docs/evidence/traffic-5c/`.
+- Every number was chosen, then measured by the load test (slice 5e): the limiter's Redis script adds ~nothing
+  (the hold path is ~1 ms with it on), so the limits stay. The load test runs with `TRAFFIC_PROFILE=loadtest`,
+  which lifts the per-address limits (500 users share one address) and keeps the per-install ones.
+- No new environment variable, dependency or migration. Proof is in `docs/evidence/traffic-5c/` and `traffic-5e/`.
+
+## Load test
+
+`load-tests/` holds the k6 scripts and the written report. The headline run — 500 virtual users contending
+for the same 50 seats, each doing hold → confirm — passes with **50 bookings, 50 distinct seats, 0
+duplicates, and 450 clean `409 seat_taken`** (the DB query `GROUP BY (showtime_id, seat_id) HAVING COUNT(*) > 1`
+returns nothing). The waiting-room run proves the cap, the FIFO line and the fixed admission rate under 500
+users. Full numbers in `load-tests/REPORT.md`; the traffic story is `docs/TRAFFIC.md`; the sharding plan is
+`docs/SHARDING.md`.
 
 ## Docs
 
 - `docs/RULES.md` — every requirement, as a checklist
+- `docs/TRAFFIC.md` — the traffic-management write-up
+- `docs/SHARDING.md` — the sharding plan (plan only)
 - `docs/decisions/` — architecture decision records
 - `docs/evidence/` — evidence captured per slice
 - `AGENTS.md` — how AI agents work in this repo

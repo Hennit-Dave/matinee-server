@@ -14,6 +14,8 @@
  * All windows are 60 s: easy to read ("per minute") and long enough that the weighted-window estimate (see
  * slidingWindow.ts) is smooth.
  */
+import type { TrafficProfile } from '../traffic/profile.js';
+
 export type PolicyName = 'seatsPoll' | 'hold' | 'booking' | 'search' | 'queue';
 
 export interface RateLimitPolicy {
@@ -52,3 +54,29 @@ export const RATE_LIMIT_POLICIES: Readonly<Record<PolicyName, RateLimitPolicy>> 
    */
   queue: { windowMs: MINUTE_MS, user: 60, ip: 600 },
 };
+
+/**
+ * The per-address limit under `TRAFFIC_PROFILE=loadtest` (ADR 0016's open item, slice 5e). The k6 test sends 500 users from
+ * ONE address at the same 50 seats; the shipped address limits (hold 40/min, booking 20/min) are the production backstop and
+ * would refuse that burst before it measured anything. "Lifted" = high enough that a realistic burst never reaches it, while the
+ * limiter still runs its Redis script on every request — so the load test measures the limiter's own cost on the hot path rather
+ * than bypassing it.
+ */
+export const LOADTEST_ADDRESS_LIMIT = 1_000_000_000;
+
+/**
+ * The policies a server should enforce for a given traffic profile. Under `loadtest` the per-ADDRESS limits are lifted and the
+ * per-INSTALL limits are kept: each virtual user is its own install doing one honest hold + booking, so the install limit is what
+ * a real single user faces, and the address limit (which collapses all 500 users onto one) is the only part that is artificial.
+ */
+export function policiesForProfile(
+  profile: TrafficProfile,
+  policies: Readonly<Record<PolicyName, RateLimitPolicy>> = RATE_LIMIT_POLICIES,
+): Readonly<Record<PolicyName, RateLimitPolicy>> {
+  if (profile !== 'loadtest') return policies;
+  const lifted = {} as Record<PolicyName, RateLimitPolicy>;
+  for (const name of Object.keys(policies) as PolicyName[]) {
+    lifted[name] = { ...policies[name], ip: LOADTEST_ADDRESS_LIMIT };
+  }
+  return lifted;
+}

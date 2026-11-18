@@ -1,0 +1,49 @@
+AFTER: the 500/50 run passes — 50 bookings, zero double bookings, clean 409s (traffic slice 5e, the k6 headline)
+
+Code:    branch feat/traffic-5e, AFTER the rate-limit scaling change. TRAFFIC_PROFILE=loadtest now lifts the per-ADDRESS rate
+         limits (and keeps the per-install ones), so the same switch turns off the room, the shedding and the address hold cap
+         AND lifts the address limits — the one switch that makes the 500-user run possible without touching product behaviour.
+Server:  the real src/api/main.ts built (dist/) over the same throwaway Postgres 16 (54329) and Redis 8 (6391), PORT=3001.
+Probe:   load-tests/seat-contention.js — 500 VUs, 1 iteration each, seatIds[(VU-1) % 50], hold -> confirm on 201.
+Suite:   npm run lint (exit 0), npm run typecheck (exit 0), npm test (340 tests, 248 pass, 0 fail, 92 skipped).
+
+---- k6: 500 VUs, the same 50 seats, hold -> confirm (after the scaling change) ----
+
+     hold_201................: 50      (the 50 winners, one per seat)
+     hold_409_seat_taken.....: 450     (every other attempt, a clean refusal)
+     booking_201.............: 50      (every winner confirmed)
+     unexpected..............: 0       (no 5xx, no unexpected 4xx)
+
+     hold_duration...........: med 1.15 ms, p95 11.29 ms, p99 23.84 ms
+     booking_duration........: med 4.22 ms, p95 21.44 ms, p99 22.88 ms
+     http_req_duration.......: med 1.17 ms, p95 16.84 ms, p99 24.33 ms
+
+   THRESHOLD: unexpected = 0 (count===0 held) — the run PASSES.
+
+   NOTE ON "http_req_failed = 81.66%": k6's built-in counter treats every 4xx as a failure, so it reports the 450 CORRECT
+   409 seat_taken refusals as "failed". The `unexpected` counter is the honest one: it separates the expected 409s (correct
+   behaviour) from real errors (5xx / 429 / 400 / 404 / 403), and it is zero.
+
+---- the database after the run (the proof no seat was sold twice) ----
+
+   showtime id: 7e0b1997-15b7-4ce6-b38e-9971f7405c30
+
+     SELECT COUNT(*) AS total, COUNT(DISTINCT seat_id) AS distinct_seats
+       FROM bookings WHERE showtime_id = '7e0b1997-15b7-4ce6-b38e-9971f7405c30';
+       ->  total 50, distinct_seats 50        (one booking per seat)
+
+     SELECT showtime_id, seat_id, COUNT(*)
+       FROM bookings WHERE showtime_id = '7e0b1997-15b7-4ce6-b38e-9971f7405c30'
+       GROUP BY showtime_id, seat_id HAVING COUNT(*) > 1;
+       ->  (0 rows)                            (no (showtime, seat) sold twice)
+
+     SELECT COUNT(DISTINCT owner_id) AS distinct_owners
+       FROM bookings WHERE showtime_id = '7e0b1997-15b7-4ce6-b38e-9971f7405c30';
+       ->  50                                 (50 different callers, one seat each)
+
+READ THIS AS:
+  500 users arrived over about one second and each tried to hold one of the same 50 seats (10 contenders per seat, by
+  construction). Exactly 50 holds won — one per seat — and all 50 confirmed. The other 450 attempts were refused with a clean
+  409 seat_taken, none of them a 5xx. The database holds exactly 50 rows for the showtime, 50 distinct seats, and the
+  GROUP BY ... HAVING COUNT(*) > 1 query returns nothing: the Postgres UNIQUE (showtime_id, seat_id) constraint made double
+  booking impossible, exactly as ADR 0015 said. The raw k6 summary is summary-seat-contention-after.json.

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { RATE_LIMIT_POLICIES, type PolicyName } from './policies.js';
+import { LOADTEST_ADDRESS_LIMIT, RATE_LIMIT_POLICIES, policiesForProfile, type PolicyName } from './policies.js';
 
 const names = Object.keys(RATE_LIMIT_POLICIES) as PolicyName[];
 
@@ -41,4 +41,15 @@ test('the waiting-room policy leaves room for an honest waiter: a 3 s poll is 20
   const fastestPollsPerMinute = 60_000 / 3_000; // the app never polls faster than the server's pollAfterMs of at least 3 s
   assert.ok(user >= fastestPollsPerMinute * 2, 'an install polling at the fastest rate stays well under its limit');
   assert.ok(ip >= user * 5, 'several people waiting on one address (a household, a venue) are not refused');
+});
+
+test('TRAFFIC_PROFILE=loadtest lifts the per-ADDRESS limit and leaves the per-INSTALL limit alone (slice 5e)', () => {
+  const lifted = policiesForProfile('loadtest');
+  for (const name of names) {
+    assert.equal(lifted[name].ip, LOADTEST_ADDRESS_LIMIT, `${name}: address limit lifted`);
+    assert.equal(lifted[name].user, RATE_LIMIT_POLICIES[name].user, `${name}: install limit unchanged`);
+    assert.equal(lifted[name].windowMs, RATE_LIMIT_POLICIES[name].windowMs, `${name}: window unchanged`);
+  }
+  // The shipped profile (or an unset one) is the production table, untouched.
+  assert.equal(policiesForProfile('default'), RATE_LIMIT_POLICIES);
 });
