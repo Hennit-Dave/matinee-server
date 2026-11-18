@@ -16,7 +16,7 @@
  */
 import type { TrafficProfile } from '../traffic/profile.js';
 
-export type PolicyName = 'seatsPoll' | 'hold' | 'booking' | 'search' | 'queue';
+export type PolicyName = 'seatsPoll' | 'hold' | 'booking' | 'search' | 'queue' | 'checkout';
 
 export interface RateLimitPolicy {
   /** Length of the sliding window. */
@@ -53,6 +53,11 @@ export const RATE_LIMIT_POLICIES: Readonly<Record<PolicyName, RateLimitPolicy>> 
    * long line to ask less often), so 20 a minute honest, plus a join and a retry. User: 3x that. IP: 10 people waiting on one address at once.
    */
   queue: { windowMs: MINUTE_MS, user: 60, ip: 600 },
+  /**
+   * POST /showtimes/:id/checkout (ADR 0019). One PaymentIntent per purchase, plus a couple of idempotent
+   * retries with the same key: the same strictness as booking, on the route that starts the charge.
+   */
+  checkout: { windowMs: MINUTE_MS, user: 5, ip: 20 },
 };
 
 /**

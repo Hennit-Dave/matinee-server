@@ -5,7 +5,7 @@ import { LOADTEST_ADDRESS_LIMIT, RATE_LIMIT_POLICIES, policiesForProfile, type P
 const names = Object.keys(RATE_LIMIT_POLICIES) as PolicyName[];
 
 test('every policy is usable: a window of at least a second, whole numbers, and an address limit at least the user limit', () => {
-  assert.deepEqual([...names].sort(), ['booking', 'hold', 'queue', 'search', 'seatsPoll']);
+  assert.deepEqual([...names].sort(), ['booking', 'checkout', 'hold', 'queue', 'search', 'seatsPoll']);
   for (const name of names) {
     const { windowMs, user, ip } = RATE_LIMIT_POLICIES[name];
     assert.ok(Number.isInteger(windowMs) && windowMs >= 1_000, `${name}: window`);
