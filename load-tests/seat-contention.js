@@ -22,6 +22,8 @@ const booking201 = new Counter('booking_201');
 const unexpected = new Counter('unexpected');
 
 export const options = {
+  // p(50) is `med`; p95 and p99 are the headline latency numbers the report needs.
+  summaryTrendStats: ['avg', 'min', 'med', 'max', 'p(90)', 'p(95)', 'p(99)'],
   scenarios: {
     contention: {
       executor: 'per-vu-iterations',

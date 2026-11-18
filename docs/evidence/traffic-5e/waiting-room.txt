@@ -1,0 +1,34 @@
+AFTER: the waiting room under a 500-user burst — cap holds, FIFO positions, fixed-rate admission (slice 5e)
+
+Code:    branch feat/traffic-5e. TRAFFIC_PROFILE=loadtest (address limits lifted, room is NOT turned off here because the
+         explicit WAITING_ROOM_ENABLED=true wins over the profile) with WAITING_ROOM_MAX_ACTIVE=5 and
+         WAITING_ROOM_ADMIT_PER_MINUTE=12 (one admission every 5 s).
+Server:  the real src/api/main.ts built (dist/) over the same throwaway Postgres 16 (54329) and Redis 8 (6391), PORT=3001.
+Probe:   load-tests/waiting-room.js — 500 VUs join at once, then the waiters poll GET /queue every 3 s for up to 40 s.
+
+---- k6: 500 users against a room of 5 ----
+
+     admitted_at_join........: 5        (exactly the cap)
+     queued_at_join..........: 495      (the other 495 queue)
+     ahead_sum...............: 122265   (0 + 1 + ... + 494: the 495 waiters hold the 495 DISTINCT positions)
+     admitted_later..........: 7        (the queue then drains at the fixed rate)
+     admission_second........: min 3.03 s, max 39.08 s  (7 admissions spread over ~36 s, not a burst)
+     unexpected..............: 0        (no 5xx, no unexpected status)
+
+     join_duration...........: med 1.10 ms, p95 5.93 ms, p99 13.29 ms
+     poll_duration...........: med 1.72 ms, p95 5.17 ms, p99 6.82 ms
+     http_req_duration.......: med 1.61 ms, p95 5.17 ms, p99 7.01 ms   (7,386 requests, 0 failed)
+
+   THRESHOLD: unexpected = 0 (count===0 held) — the run PASSES.
+
+---- the server log (the FIFO line) ----
+
+   Every queued join is one `waiting_room_join` log line with `outcome: queued, ahead: N`. Across the run the 495 waiters
+   reported 495 DISTINCT `ahead` values from 0 to 494 — the line is first in, first out, and each place is unique. The sum of
+   the 495 positions is exactly 122265 (0+...+494), which is only possible if every position 0..494 is taken exactly once.
+
+READ THIS AS:
+  The cap holds under a 500-user burst: only 5 are choosing seats at once, the rest are in a line with distinct positions, and
+  when the 5 leave, the line is let in at the fixed rate (one every 5 s) — not in a burst. The exact even spacing is pinned by
+  ADR 0017's integration tests ("one millisecond short admits nobody"); this run shows the same behaviour holds at 500 users
+  with no 5xx and sub-10 ms polls. The raw k6 summary is summary-waiting-room.json.

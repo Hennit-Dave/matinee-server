@@ -21,7 +21,7 @@ const admittedAtJoin = new Counter('admitted_at_join');
 const queuedAtJoin = new Counter('queued_at_join');
 const aheadSum = new Counter('ahead_sum');
 const admittedLater = new Counter('admitted_later');
-const admissionSecond = new Trend('admission_second', true);
+const admissionSecond = new Trend('admission_second'); // seconds since the run started (a plain number, not a time metric)
 const joinDuration = new Trend('join_duration', true);
 const pollDuration = new Trend('poll_duration', true);
 const unexpected = new Counter('unexpected');
@@ -29,6 +29,7 @@ const unexpected = new Counter('unexpected');
 const OBSERVE_MS = 40_000; // long enough to watch a few admissions at the fixed rate, not to drain everyone
 
 export const options = {
+  summaryTrendStats: ['avg', 'min', 'med', 'max', 'p(90)', 'p(95)', 'p(99)'],
   scenarios: {
     room: {
       executor: 'per-vu-iterations',
