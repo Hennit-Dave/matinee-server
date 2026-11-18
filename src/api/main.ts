@@ -6,9 +6,15 @@ import { createRedisRyowStore } from '../bookings/ryow.js';
 import { closeDbClients, createDbClients } from '../db/clients.js';
 import { readMaxInFlight } from '../http/loadShed.js';
 import { createLogger } from '../http/logger.js';
-import { createRedisClient } from '../jobs/connection.js';
+import { createBullMqConnection, createRedisClient } from '../jobs/connection.js';
+import { createPaymentQueue, type PaymentQueue } from '../jobs/queue.js';
 import { createMovieCache, createRedisStore } from '../movies/cache.js';
 import { createMovieService } from '../movies/service.js';
+import { createCheckoutService, type CheckoutService } from '../payments/checkoutService.js';
+import { createStripeEventRepo } from '../payments/eventRepo.js';
+import { createOrderRepo } from '../payments/orderRepo.js';
+import { createStripeGateway } from '../payments/stripe.js';
+import { createWebhookService, type WebhookService } from '../payments/webhookService.js';
 import { createRateLimiter } from '../ratelimit/limiter.js';
 import { policiesForProfile } from '../ratelimit/policies.js';
 import { createRedisRateLimitStore } from '../ratelimit/slidingWindow.js';
@@ -19,6 +25,7 @@ import { readWaitingRoomConfig } from '../waitingroom/config.js';
 import { createRedisWaitingRoomStore } from '../waitingroom/store.js';
 import { createWaitingRoom } from '../waitingroom/waitingRoom.js';
 import { createApp } from './app.js';
+import type { Redis } from 'ioredis';
 
 // Local-development default only; a host injects its own PORT.
 const DEFAULT_PORT = 3000;
@@ -38,6 +45,15 @@ function readTmdbToken(): string {
   const token = process.env.TMDB_READ_TOKEN;
   if (!token) throw new Error('TMDB_READ_TOKEN is not set.');
   return token;
+}
+
+// Stripe is optional at boot: without both keys the checkout and webhook routes are simply not mounted, so a
+// partially-configured server still serves the rest of the app. The values are never logged.
+function readStripeConfig(): { secretKey?: string; webhookSecret?: string } {
+  return {
+    secretKey: process.env.STRIPE_SECRET_KEY?.trim() || undefined,
+    webhookSecret: process.env.STRIPE_WEBHOOK_SECRET?.trim() || undefined,
+  };
 }
 
 const logger = createLogger();
@@ -109,12 +125,31 @@ const ryow = createRedisRyowStore(redis);
 const seats = createSeatService(db, { repo: bookingRepo, holds, ryow });
 const bookings = createBookingService({ repo: bookingRepo, holds, ryow, logger });
 
+// Payments (ADR 0019): checkout and the webhook, mounted only when both Stripe keys are present. The BullMQ
+// producer uses its own Redis connection (maxRetriesPerRequest: null) on the same Railway Redis (ADR 0008).
+const stripeConfig = readStripeConfig();
+let checkout: CheckoutService | undefined;
+let webhook: WebhookService | undefined;
+let paymentQueue: PaymentQueue | undefined;
+let bullMq: Redis | undefined;
+if (stripeConfig.secretKey && stripeConfig.webhookSecret) {
+  const gateway = createStripeGateway({ secretKey: stripeConfig.secretKey, webhookSecret: stripeConfig.webhookSecret });
+  const orderRepo = createOrderRepo(db);
+  const eventRepo = createStripeEventRepo(db);
+  bullMq = createBullMqConnection(logger);
+  paymentQueue = createPaymentQueue(bullMq);
+  checkout = createCheckoutService({ repo: orderRepo, gateway, bookings, logger });
+  webhook = createWebhookService({ gateway, events: eventRepo, enqueue: (name, data, jobId) => paymentQueue!.add(name, data, jobId), logger });
+} else {
+  logger.warn('payments_disabled', { note: 'STRIPE_SECRET_KEY and STRIPE_WEBHOOK_SECRET are not both set; checkout and the webhook are not mounted.' });
+}
+
 // Fails open if Redis is down (limiter.ts); the hold store above is the part that fails closed.
 // TRAFFIC_PROFILE=loadtest lifts the per-ADDRESS limits (the k6 test sends 500 users from one address) and
 // keeps the per-install limits (policies.ts, ADR 0016's open item).
 const rateLimiter = createRateLimiter({ store: createRedisRateLimitStore(redis), logger, policies: policiesForProfile(holdCaps.profile) });
 
-const app = createApp({ logger, db, redis, movies, showtimes, seats, bookings, rateLimiter, waitingRoom, showtimeExists, maxInFlight: overload.maxInFlight });
+const app = createApp({ logger, db, redis, movies, showtimes, seats, bookings, checkout, webhook, rateLimiter, waitingRoom, showtimeExists, maxInFlight: overload.maxInFlight });
 
 const server = app.listen(port, () => {
   logger.info('api_listening', { port });
@@ -124,6 +159,8 @@ async function shutdown(signal: NodeJS.Signals) {
   logger.info('api_shutting_down', { reason: signal });
   server.closeIdleConnections();
   await new Promise<void>((resolve) => server.close(() => resolve()));
+  await paymentQueue?.close();
+  bullMq?.disconnect();
   redis.disconnect();
   await closeDbClients(db);
   logger.info('api_closed');

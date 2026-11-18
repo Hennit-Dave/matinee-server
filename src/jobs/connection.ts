@@ -21,3 +21,13 @@ export function createRedisClient(logger: Logger, url?: string, overrides?: Redi
   });
   return redis;
 }
+
+/**
+ * A Redis connection for BullMQ (ADR 0019). BullMQ requires `maxRetriesPerRequest: null` — it does its own
+ * retry and a re-sent command on a dropped connection would corrupt the queue — so the producer/consumer use
+ * this dedicated client, separate from the hold/rate-limit client, on the same Railway Redis (never the
+ * Upstash "Jobapplicationmanager" DB; ADR 0008).
+ */
+export function createBullMqConnection(logger: Logger, url?: string): Redis {
+  return createRedisClient(logger, url, { maxRetriesPerRequest: null });
+}

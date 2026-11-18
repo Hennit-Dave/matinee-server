@@ -110,13 +110,36 @@ empty, wrong or down.
   and so does the seat map. Nothing is booked without a hold check, and nothing double-books either way.
 - **Read-your-own-writes**: bookings are read from the replica, except for 5 s after the caller's own booking
   (`X-Client-Id` on the seat-map request), when they come from the primary.
-- `POST /showtimes/:id/bookings` is a **temporary** direct commit with no payment step; the payments slice
-  replaces it with the verified-webhook job (ADR 0015). It is the only way to book today.
+- `POST /showtimes/:id/bookings` is the **temporary direct commit** with no payment step, kept as the k6
+  load-test path. The real booking path is the payments webhook job (see "Payments" below), which calls the same
+  `confirmBooking` (ADR 0015, 0019).
 - Needs the migration: `npm run db:migrate` adds `bookings` (a new table only; no existing row changes).
 
 Proof is in `docs/evidence/traffic-5a/`: the tests, a narrated run (`proof.txt`), five deliberate breakages of
 the guarantee that the tests catch (`mutation-checks.txt`), and the race this prevents (`race-demo.txt`: 50 users,
 one seat, no constraint, sold 50 times).
+
+## Payments (test mode)
+
+Stripe in test mode, GBP (ADR 0001, 0019). Checkout creates a PaymentIntent and returns a `client_secret` for the
+native PaymentSheet (P2); a booking is confirmed only by a **verified webhook**, processed in a background job —
+never by the checkout call itself.
+
+| Route | Does | Returns / refusals |
+|---|---|---|
+| `POST /showtimes/:id/checkout` `{ seatIds }` + `Idempotency-Key` | Verifies the caller still holds every seat, prices the order server-side (seats **+ £1.50**), creates the PaymentIntent, returns its `client_secret` | `201 { reference, clientSecret, seatTotalCents, feeCents, totalCents, totalFormatted, currency, status }` · `409 seat_not_held` · `409 idempotency_mismatch` · `503 payment_unavailable` |
+| `POST /webhooks/stripe` (raw body) | Verifies the Stripe signature, records the event id (dedup), enqueues the job, returns 200 fast | `200 { received: true }` |
+
+- **Idempotency.** The `Idempotency-Key` header makes a repeated checkout return the SAME PaymentIntent (no second
+  charge); a key reused with different seats is a `409`. The webhook dedup is separate: every Stripe `event id` is
+  stored first, so a re-delivered event is skipped.
+- **The worker** (`npm run worker`, a separate always-on process) turns a succeeded payment into a booking via
+  `confirmBooking`, records the charge in an **append-only `ledger_entries`** table, and — if the hold lapsed — refunds
+  the PaymentIntent and records the refund. Retries with exponential backoff, then the job moves to BullMQ's failed set.
+- **Never cached:** payment status and webhook idempotency records live in Postgres only (RULES C4).
+- Needs the migration: `npm run db:migrate` adds `orders`, `ledger_entries` and `processed_stripe_events`.
+- Set `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET` (names in `.env.example`, values in `.env` / `.env.test.local`)
+  to mount the routes; without them the server boots without payments.
 
 ## Hold caps
 

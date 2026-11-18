@@ -46,6 +46,14 @@ const ALLOWED = [
   'perAddress',
   'profile',
   'note',
+  // Payments slice (ADR 0019): the correlation keys that let "what happened to this payment at 3:14pm?"
+  // be answered from the logs alone. `reference` ties checkout -> webhook -> job -> booking -> ledger.
+  'reference',
+  'paymentIntentId',
+  'eventId',
+  'jobId',
+  'amountCents',
+  'eventType',
 ] as const;
 export type LogField = (typeof ALLOWED)[number];
 export type LogFields = Partial<Record<LogField, string | number | boolean>>;

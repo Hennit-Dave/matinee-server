@@ -21,7 +21,9 @@ export type ErrorCode =
   | 'rate_limited'
   | 'waiting_room_required'
   | 'waiting_room_full'
-  | 'server_busy';
+  | 'server_busy'
+  | 'idempotency_mismatch'
+  | 'payment_unavailable';
 
 const STATUS: Record<ErrorCode, number> = {
   not_found: 404,
@@ -39,6 +41,8 @@ const STATUS: Record<ErrorCode, number> = {
   waiting_room_required: 403,
   waiting_room_full: 503,
   server_busy: 503,
+  idempotency_mismatch: 409,
+  payment_unavailable: 503,
 };
 
 // Safe English defaults for debugging. The app owns user-facing copy and switches on `code`.
@@ -64,6 +68,9 @@ const MESSAGE: Record<ErrorCode, string> = {
   waiting_room_required: 'Join the waiting room before choosing seats for this showing.',
   waiting_room_full: 'The waiting room is full. Please try again shortly.',
   server_busy: 'We are very busy right now. Please try again shortly.',
+  // Payments slice (ADR 0019). The idempotency key was already used with a different payload; payment setup is unavailable right now.
+  idempotency_mismatch: 'That request id was already used for a different order.',
+  payment_unavailable: 'Payment is temporarily unavailable. Please try again shortly.',
 };
 
 /** Seconds a client should wait before retrying a `holds_unavailable` (sent as `Retry-After`). */

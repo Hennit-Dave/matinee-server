@@ -35,6 +35,10 @@ function boot(overrides: Partial<BookingService> = {}) {
         totalFormatted: '£18.50',
       };
     },
+    async verifyHolds(request) {
+      calls.push({ method: 'verifyHolds', request });
+      return { showtimeId: request.showtimeId, priceCents: 1850, seats: [{ id: SEAT_1, row: 'A', number: 1 }] };
+    },
     ...overrides,
   };
   const server = createApp({

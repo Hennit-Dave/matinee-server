@@ -103,3 +103,64 @@ model Booking {
   @@unique([showtimeId, seatId])
   @@map("bookings")
 }
+
+/// One payment order: a Stripe PaymentIntent linked to the seats it pays for, the caller, and the client's
+/// idempotency key (ADR 0019). `reference` is the order id and becomes `bookings.reference` on success, so the
+/// charge, the order and the seat rows share one id. `seatIds` is the seats as validated at checkout (a snapshot,
+/// the authoritative per-seat truth is the booking row + the unique key). Prices are captured at checkout so a
+/// later price change cannot touch an in-flight order (RULES A3: whole pence).
+model Order {
+  id                    String   @id @default(uuid()) @db.Uuid
+  reference             String   @unique @db.Uuid
+  ownerId               String   @map("owner_id")
+  showtimeId            String   @map("showtime_id") @db.Uuid
+  seatIds               Json     @map("seat_ids")
+  seatTotalCents        Int      @map("seat_total_cents")
+  feeCents              Int      @map("fee_cents")
+  totalCents            Int      @map("total_cents")
+  currency              String
+  stripePaymentIntentId String   @unique @map("stripe_payment_intent_id")
+  /// The client's checkout idempotency key, scoped per owner (a key is not a secret and not unique across callers).
+  idempotencyKey        String   @map("idempotency_key")
+  /// 'requires_payment' | 'succeeded' | 'refunded' | 'failed'. Rebuildable from the ledger; kept for fast reads.
+  status                String
+  createdAt             DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt             DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+  ledger                LedgerEntry[]
+
+  @@unique([ownerId, idempotencyKey])
+  @@index([ownerId])
+  @@map("orders")
+}
+
+/// The append-only financial record for an order (ADR 0019). One row per money movement: a charge (the Stripe
+/// PaymentIntent) or a refund. `amountCents` is always positive; the direction is `kind`. `stripeObjectId` is
+/// unique so a retried job can never record the same Stripe object twice. NEVER updated or deleted — corrections
+/// are new rows, and the order's net position is `SUM(charge) - SUM(refund)` over these rows.
+model LedgerEntry {
+  id             String   @id @default(uuid()) @db.Uuid
+  orderId        String   @map("order_id") @db.Uuid
+  kind           String
+  amountCents    Int      @map("amount_cents")
+  stripeObjectId String   @unique @map("stripe_object_id")
+  stripeEventId  String?  @map("stripe_event_id")
+  reason         String
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  order          Order    @relation(fields: [orderId], references: [id], onDelete: Restrict)
+
+  @@map("ledger_entries")
+}
+
+/// The webhook idempotency store (ADR 0019): every Stripe event id is recorded durably FIRST, before the 200,
+/// so a re-delivered event is skipped by its primary key. `status` tracks processing; it is metadata, not money,
+/// so the transition is the one allowed update.
+model ProcessedStripeEvent {
+  eventId         String    @id @map("event_id")
+  type            String
+  paymentIntentId String?   @map("payment_intent_id")
+  status          String    @default("received")
+  receivedAt      DateTime  @default(now()) @map("received_at") @db.Timestamptz(3)
+  processedAt     DateTime? @map("processed_at") @db.Timestamptz(3)
+
+  @@map("processed_stripe_events")
+}

@@ -168,6 +168,7 @@ function bootGated(hasPass: boolean, refuseWith?: ApiError) {
     async acquireHolds(r) { served.push('hold'); return { showtimeId: r.showtimeId, seatIds: [...r.seatIds], expiresAt: '2026-11-20T20:10:00.000Z', expiresInMs: 600_000 }; },
     async releaseHolds(r) { served.push('release'); return { released: [...r.seatIds] }; },
     async confirmBooking() { served.push('book'); throw new ApiError('seat_not_held', { seatIds: [SEAT] }); },
+    async verifyHolds() { served.push('verifyHolds'); throw new ApiError('seat_not_held', { seatIds: [SEAT] }); },
   };
   const rateLimiter: RateLimiter = { limit: () => (_req, _res, next) => next(refuseWith) };
   const app = createApp({ logger: createLogger(() => {}), db: {} as never, redis: {} as never, rateLimiter, seats, bookings, waitingRoom: room, showtimeExists: async () => true });

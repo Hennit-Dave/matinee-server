@@ -164,6 +164,17 @@ export function createFakeRepo(seed: FakeRepoSeed): FakeBookingRepo {
       if (clash) throw new SeatAlreadyBookedError();
       repo.bookings.push(...rows);
     },
+    async findBookingByReference(reference) {
+      const rows = repo.bookings.filter((b) => b.reference === reference);
+      if (rows.length === 0) return null;
+      const byId = new Map<string, { row: string; number: number }>();
+      for (const list of Object.values(seed.screens)) for (const s of list) byId.set(s.id, { row: s.row, number: s.number });
+      return {
+        showtimeId: rows[0]!.showtimeId,
+        priceCents: rows[0]!.priceCents,
+        seats: rows.map((b) => ({ id: b.seatId, row: byId.get(b.seatId)?.row ?? 'A', number: byId.get(b.seatId)?.number ?? 1 })),
+      };
+    },
   };
   return repo;
 }
