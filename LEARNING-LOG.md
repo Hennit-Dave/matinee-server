@@ -45,3 +45,6 @@ What clicked for me was that the waiting room did not need a constantly running 
 ## Slice 5e · Load test — the bottleneck below the code — 2026-11-18
 
 What surprised me was that the small database pool held up because Redis limited booking attempts to the users who won a seat hold. The connection failures happened before requests reached the app, showing me that bottlenecks can sit below my code. I learned to measure each layer and record test conditions clearly: staggering arrivals helped the local test run, but it was not the same as handling 500 simultaneous connections.
+
+## Slice P1 · Payments — a successful charge isn't a confirmed booking — 2026-11-18
+What clicked for me was that a successful payment does not automatically mean a confirmed booking. The verified webhook starts that process, and the worker records the charge before trying to deliver the seats. If the hold has expired, P1 refunds the payment, while idempotent processing makes retries safe without creating duplicate bookings or refunds.
