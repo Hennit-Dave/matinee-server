@@ -10,7 +10,7 @@ import { createRedisClient } from '../jobs/connection.js';
 import { createMovieCache, createRedisStore } from '../movies/cache.js';
 import { createMovieService } from '../movies/service.js';
 import { createRateLimiter } from '../ratelimit/limiter.js';
-import { RATE_LIMIT_POLICIES } from '../ratelimit/policies.js';
+import { policiesForProfile } from '../ratelimit/policies.js';
 import { createRedisRateLimitStore } from '../ratelimit/slidingWindow.js';
 import { createTmdbMovieSource } from '../movies/tmdb.js';
 import { createSeatService } from '../showtimes/seatService.js';
@@ -110,7 +110,9 @@ const seats = createSeatService(db, { repo: bookingRepo, holds, ryow });
 const bookings = createBookingService({ repo: bookingRepo, holds, ryow, logger });
 
 // Fails open if Redis is down (limiter.ts); the hold store above is the part that fails closed.
-const rateLimiter = createRateLimiter({ store: createRedisRateLimitStore(redis), logger, policies: RATE_LIMIT_POLICIES });
+// TRAFFIC_PROFILE=loadtest lifts the per-ADDRESS limits (the k6 test sends 500 users from one address) and
+// keeps the per-install limits (policies.ts, ADR 0016's open item).
+const rateLimiter = createRateLimiter({ store: createRedisRateLimitStore(redis), logger, policies: policiesForProfile(holdCaps.profile) });
 
 const app = createApp({ logger, db, redis, movies, showtimes, seats, bookings, rateLimiter, waitingRoom, showtimeExists, maxInFlight: overload.maxInFlight });
 
