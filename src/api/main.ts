@@ -4,6 +4,7 @@ import { readHoldCaps } from '../bookings/holdCaps.js';
 import { createRedisHoldStore } from '../bookings/holdStore.js';
 import { createRedisRyowStore } from '../bookings/ryow.js';
 import { closeDbClients, createDbClients } from '../db/clients.js';
+import { readMaxInFlight } from '../http/loadShed.js';
 import { createLogger } from '../http/logger.js';
 import { createRedisClient } from '../jobs/connection.js';
 import { createMovieCache, createRedisStore } from '../movies/cache.js';
@@ -14,6 +15,9 @@ import { createRedisRateLimitStore } from '../ratelimit/slidingWindow.js';
 import { createTmdbMovieSource } from '../movies/tmdb.js';
 import { createSeatService } from '../showtimes/seatService.js';
 import { createShowtimeService } from '../showtimes/service.js';
+import { readWaitingRoomConfig } from '../waitingroom/config.js';
+import { createRedisWaitingRoomStore } from '../waitingroom/store.js';
+import { createWaitingRoom } from '../waitingroom/waitingRoom.js';
 import { createApp } from './app.js';
 
 // Local-development default only; a host injects its own PORT.
@@ -44,11 +48,15 @@ let port: number;
 let db: ReturnType<typeof createDbClients>;
 let tmdbReadToken: string;
 let holdCaps: ReturnType<typeof readHoldCaps>;
+let roomSettings: ReturnType<typeof readWaitingRoomConfig>;
+let overload: ReturnType<typeof readMaxInFlight>;
 try {
   port = readPort();
   db = createDbClients();
   tmdbReadToken = readTmdbToken();
   holdCaps = readHoldCaps();
+  roomSettings = readWaitingRoomConfig();
+  overload = readMaxInFlight();
 } catch (err) {
   logger.error('api_start_failed', { reason: err instanceof Error ? err.message : String(err) });
   process.exit(1);
@@ -73,6 +81,30 @@ if (holdCaps.profile === 'loadtest') {
   logger.warn('traffic_profile_loadtest', { note: 'relaxed traffic limits for a load test; never run production like this' });
 }
 const holds = createRedisHoldStore(redis, { caps: holdCaps.caps });
+
+// The waiting room (ADR 0017) and load shedding. The numbers are logged at boot so a deploy shows what it is running.
+const { config: roomConfig } = roomSettings;
+logger.info('waiting_room_config', {
+  enabled: roomConfig.enabled,
+  maxActive: roomConfig.maxActive,
+  admitPerMinute: roomConfig.admitPerMinute,
+  maxInFlight: overload.maxInFlight,
+  profile: roomSettings.profile,
+});
+if (roomConfig.enabled && roomConfig.maxActiveIsDefault) {
+  // The default (2) exists so the queue can be shown on two or three phones. It is far too low for production: raise it before deploying.
+  logger.warn('waiting_room_demo_defaults', {
+    maxActive: roomConfig.maxActive,
+    note: 'WAITING_ROOM_MAX_ACTIVE is not set, so the DEMO value is in use: every showing queues everyone behind this many people. Set it for production (ADR 0017).',
+  });
+}
+const waitingRoom = createWaitingRoom({
+  store: createRedisWaitingRoomStore(redis, { policy: { maxActive: roomConfig.maxActive, admitPerMinute: roomConfig.admitPerMinute } }),
+  holds,
+  config: roomConfig,
+  logger,
+});
+const showtimeExists = async (id: string) => (await db.reader.$replica().showtime.findUnique({ where: { id }, select: { id: true } })) !== null;
 const ryow = createRedisRyowStore(redis);
 const seats = createSeatService(db, { repo: bookingRepo, holds, ryow });
 const bookings = createBookingService({ repo: bookingRepo, holds, ryow, logger });
@@ -80,7 +112,7 @@ const bookings = createBookingService({ repo: bookingRepo, holds, ryow, logger }
 // Fails open if Redis is down (limiter.ts); the hold store above is the part that fails closed.
 const rateLimiter = createRateLimiter({ store: createRedisRateLimitStore(redis), logger, policies: RATE_LIMIT_POLICIES });
 
-const app = createApp({ logger, db, redis, movies, showtimes, seats, bookings, rateLimiter });
+const app = createApp({ logger, db, redis, movies, showtimes, seats, bookings, rateLimiter, waitingRoom, showtimeExists, maxInFlight: overload.maxInFlight });
 
 const server = app.listen(port, () => {
   logger.info('api_listening', { port });

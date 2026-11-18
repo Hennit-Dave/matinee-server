@@ -14,7 +14,7 @@
  * All windows are 60 s: easy to read ("per minute") and long enough that the weighted-window estimate (see
  * slidingWindow.ts) is smooth.
  */
-export type PolicyName = 'seatsPoll' | 'hold' | 'booking' | 'search';
+export type PolicyName = 'seatsPoll' | 'hold' | 'booking' | 'search' | 'queue';
 
 export interface RateLimitPolicy {
   /** Length of the sliding window. */
@@ -46,4 +46,9 @@ export const RATE_LIMIT_POLICIES: Readonly<Record<PolicyName, RateLimitPolicy>> 
    * requests in 4 s, and three titles a minute is about 27. User: 60. IP: 180, three people searching at once.
    */
   search: { windowMs: MINUTE_MS, user: 60, ip: 180 },
+  /**
+   * The waiting room's join, position poll and leave (ADR 0017). A waiter polls every 3 s at the fastest (the server tells the back of a
+   * long line to ask less often), so 20 a minute honest, plus a join and a retry. User: 3x that. IP: 10 people waiting on one address at once.
+   */
+  queue: { windowMs: MINUTE_MS, user: 60, ip: 600 },
 };

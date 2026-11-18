@@ -26,6 +26,9 @@ function knownShowtime() {
   });
 }
 
+/** The seat map needs `X-Client-Id` (slice 5d, ADR 0017): the waiting room admits installs. */
+const CLIENT = { 'x-client-id': '0a11ce00-0000-4000-8000-000000000001' };
+
 function boot() {
   const calls: string[] = [];
   const logs: string[] = [];
@@ -55,7 +58,7 @@ function boot() {
 test('GET /showtimes/:id/seats returns the seat map: showtime, screen, GBP price, and rows of seats', async () => {
   const app = boot();
   try {
-    const res = await fetch(`${app.base}/showtimes/${KNOWN_ID}/seats`);
+    const res = await fetch(`${app.base}/showtimes/${KNOWN_ID}/seats`, { headers: CLIENT });
     assert.equal(res.status, 200);
     const body = ShowtimeSeatsResponseSchema.parse(await res.json());
     assert.equal(body.showtimeId, KNOWN_ID);
@@ -72,7 +75,7 @@ test('GET /showtimes/:id/seats returns the seat map: showtime, screen, GBP price
 test('GET /showtimes/:id/seats is a 404 not_found for a showtime that does not exist', async () => {
   const app = boot();
   try {
-    const res = await fetch(`${app.base}/showtimes/${randomUUID()}/seats`);
+    const res = await fetch(`${app.base}/showtimes/${randomUUID()}/seats`, { headers: CLIENT });
     assert.equal(res.status, 404);
     const body = (await res.json()) as { error: { code: string; requestId: string } };
     assert.equal(body.error.code, 'not_found');
@@ -85,7 +88,7 @@ test('GET /showtimes/:id/seats is a 404 not_found for a showtime that does not e
 test('GET /showtimes/:id/seats is a 400 validation_failed for a malformed id, and never reaches the service', async () => {
   const app = boot();
   try {
-    const res = await fetch(`${app.base}/showtimes/not-a-uuid/seats`);
+    const res = await fetch(`${app.base}/showtimes/not-a-uuid/seats`, { headers: CLIENT });
     assert.equal(res.status, 400);
     const body = (await res.json()) as { error: { code: string; details: Array<{ path: string; code: string }> } };
     assert.equal(body.error.code, 'validation_failed');
@@ -99,7 +102,7 @@ test('GET /showtimes/:id/seats is a 400 validation_failed for a malformed id, an
 test('GET /showtimes/:id/seats rejects unexpected query parameters (strict validation)', async () => {
   const app = boot();
   try {
-    const res = await fetch(`${app.base}/showtimes/${KNOWN_ID}/seats?seat=A1`);
+    const res = await fetch(`${app.base}/showtimes/${KNOWN_ID}/seats?seat=A1`, { headers: CLIENT });
     assert.equal(res.status, 400);
   } finally {
     await app.close();
@@ -115,5 +118,21 @@ test('/showtimes is not mounted when no seat service is given', async () => {
     assert.equal(res.status, 404);
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
+test('the seat map needs X-Client-Id: without one it is a 400 and the service is never asked (the waiting room admits installs)', async () => {
+  const app = boot();
+  try {
+    const none = await fetch(`${app.base}/showtimes/${KNOWN_ID}/seats`);
+    assert.equal(none.status, 400);
+    const body = (await none.json()) as { error: { code: string; details: { path: string; code: string }[] } };
+    assert.equal(body.error.code, 'validation_failed');
+    assert.deepEqual(body.error.details, [{ path: 'header.x-client-id', code: 'required' }]);
+    const bad = await fetch(`${app.base}/showtimes/${KNOWN_ID}/seats`, { headers: { 'x-client-id': 'nope' } });
+    assert.equal(bad.status, 400);
+    assert.equal(app.calls.length, 0);
+  } finally {
+    await app.close();
   }
 });

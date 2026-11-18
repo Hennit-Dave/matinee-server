@@ -79,6 +79,8 @@ export interface HoldStore {
   heldBy(showtimeId: string, ownerId: string, seatIds: readonly string[]): Promise<string[]>;
   /** The subset of `seatIds` that anyone currently holds (the seat map). */
   heldAmong(showtimeId: string, seatIds: readonly string[]): Promise<Set<string>>;
+  /** How many seats of this showing `ownerId` holds right now: the waiting room lets a holder back in ahead of the line (ADR 0017). */
+  heldCount(showtimeId: string, ownerId: string): Promise<number>;
 }
 
 /**
@@ -258,6 +260,14 @@ export function createRedisHoldStore(redis: Redis, options: RedisHoldStoreOption
       if (seatIds.length === 0) return [];
       const values = await run(() => redis.mget(...keysFor(showtimeId, seatIds)));
       return seatIds.filter((_, i) => values[i] === ownerId);
+    },
+
+    async heldCount(showtimeId, ownerId) {
+      // The owner index lists candidates; only seats whose hold key is still this owner's count (ADR 0018).
+      const seatIds = await run(() => redis.smembers(holdOwnerIndexKey(showtimeId, ownerId)));
+      if (seatIds.length === 0) return 0;
+      const values = await run(() => redis.mget(...keysFor(showtimeId, seatIds)));
+      return values.filter((value) => value === ownerId).length;
     },
 
     async heldAmong(showtimeId, seatIds) {

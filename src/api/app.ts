@@ -6,6 +6,7 @@ import { createBookingsRouter } from '../bookings/routes.js';
 import { createHealthHandler } from '../health/health.js';
 import { TRUSTED_PROXY_RANGES } from '../http/clientIp.js';
 import { createErrorHandler, notFoundHandler } from '../http/errors.js';
+import { createLoadShedder } from '../http/loadShed.js';
 import { createLogger, recordRouteBase, requestLogger, type Logger } from '../http/logger.js';
 import { requestIdMiddleware } from '../http/requestId.js';
 import { createGenresRouter, createMoviesRouter } from '../movies/routes.js';
@@ -14,6 +15,8 @@ import type { RateLimiter } from '../ratelimit/limiter.js';
 import { createShowtimesRouter } from '../showtimes/seatRoutes.js';
 import type { SeatService } from '../showtimes/seat.js';
 import type { ShowtimeService } from '../showtimes/showtime.js';
+import { createQueueRouter } from '../waitingroom/routes.js';
+import type { WaitingRoom } from '../waitingroom/waitingRoom.js';
 
 export interface AppDeps {
   logger?: Logger;
@@ -34,6 +37,15 @@ export interface AppDeps {
    * (ADR 0016). Tests that are not about limiting pass `noRateLimit`.
    */
   rateLimiter: RateLimiter;
+  /**
+   * The waiting room (ADR 0017). When present, entry to seat selection is gated and the /showtimes/:id/queue routes are mounted
+   * (they also need `showtimeExists`). When absent nothing is gated, same convention as `seats` and `bookings`.
+   */
+  waitingRoom?: WaitingRoom;
+  /** Does this showing exist? The queue refuses an unknown id, so junk ids never become Redis keys. */
+  showtimeExists?: (showtimeId: string) => Promise<boolean>;
+  /** Requests allowed in flight at once before the rest are shed with 503 server_busy (loadShed.ts). 0 or absent: no shedding. */
+  maxInFlight?: number;
 }
 
 export function createApp(deps: AppDeps) {
@@ -48,6 +60,8 @@ export function createApp(deps: AppDeps) {
   app.use(recordRouteBase);
   app.use(requestIdMiddleware);
   app.use(requestLogger(logger));
+  // After the request logger, so a shed request still gets its log line (route, 503, server_busy).
+  if (deps.maxInFlight) app.use(createLoadShedder({ maxInFlight: deps.maxInFlight, logger }));
 
   app.get('/health', createHealthHandler(deps.db, deps.redis));
   if (deps.movies) {
@@ -55,11 +69,15 @@ export function createApp(deps: AppDeps) {
     app.use('/genres', createGenresRouter(deps.movies));
   }
 
+  const gate = deps.waitingRoom?.gate();
   if (deps.seats) {
-    app.use('/showtimes', createShowtimesRouter(deps.seats, limit));
+    app.use('/showtimes', createShowtimesRouter(deps.seats, limit, gate));
   }
   if (deps.bookings) {
-    app.use('/showtimes', createBookingsRouter(deps.bookings, limit));
+    app.use('/showtimes', createBookingsRouter(deps.bookings, limit, gate));
+  }
+  if (deps.waitingRoom && deps.showtimeExists) {
+    app.use('/showtimes', createQueueRouter(deps.waitingRoom, limit, deps.showtimeExists));
   }
 
   app.use(notFoundHandler);

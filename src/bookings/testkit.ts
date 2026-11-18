@@ -15,6 +15,8 @@ import { createSeatService } from '../showtimes/seatService.js';
 import { LOAD_TEST_SCREEN_ID } from '../showtimes/seedPlan.js';
 import { createBookingRepo, type BookingRepo } from './bookingRepo.js';
 import { createBookingService, type BookingService } from './bookingService.js';
+import { createRedisWaitingRoomStore, type RedisWaitingRoomStoreOptions, type WaitingRoomStore } from '../waitingroom/store.js';
+import { createWaitingRoom, type WaitingRoom } from '../waitingroom/waitingRoom.js';
 import { createRedisHoldStore, holdKey, type HoldStore } from './holdStore.js';
 import { createRedisRyowStore, type RyowStore } from './ryow.js';
 
@@ -62,6 +64,19 @@ export interface StackOptions {
   readUrl?: string;
   /** Leave the Redis client unconnected (the Redis-down test). */
   connectRedis?: boolean;
+  /**
+   * Turn the real WAITING ROOM on (ADR 0017), on this stack's Redis, with the production settings unless overridden. Off by default: the other
+   * tests are not about the line, and the default cap of 2 would queue them. `wrapStore` is for the fail-open tests.
+   */
+  waitingRoom?: {
+    maxActive?: number;
+    admitPerMinute?: number;
+    enabled?: boolean;
+    opTimeoutMs?: number;
+    timing?: RedisWaitingRoomStoreOptions['timing'];
+    clock?: () => number;
+    wrapStore?: (real: WaitingRoomStore) => WaitingRoomStore;
+  };
   /** Hold caps for this stack's real hold store (ADR 0018). Defaults to the production caps. */
   holdCaps?: { perOwner?: number; perAddress?: number };
   /** Wrap the real hold store (to bypass or interleave its checks in a test). */
@@ -82,6 +97,8 @@ export interface Stack {
   ryow: RyowStore;
   repo: BookingRepo;
   bookings: BookingService;
+  /** The waiting room, when `waitingRoom` was given. */
+  room?: WaitingRoom;
   base: string;
   logs: string[];
   server: Server;
@@ -114,7 +131,25 @@ export async function openStack(options: StackOptions = {}): Promise<Stack> {
       })
     : noRateLimit;
 
-  const server = createApp({ logger, db, redis, seats, bookings, rateLimiter, ...options.extraDeps }).listen(0);
+  let room: WaitingRoom | undefined;
+  if (options.waitingRoom) {
+    const w = options.waitingRoom;
+    const realStore = createRedisWaitingRoomStore(redis, {
+      policy: { maxActive: w.maxActive ?? 2, admitPerMinute: w.admitPerMinute ?? 12 },
+      clock: w.clock,
+      timing: w.timing,
+    });
+    room = createWaitingRoom({
+      store: w.wrapStore ? w.wrapStore(realStore) : realStore,
+      holds,
+      config: { enabled: w.enabled ?? true, maxActive: w.maxActive ?? 2, admitPerMinute: w.admitPerMinute ?? 12, maxActiveIsDefault: false },
+      logger,
+      opTimeoutMs: w.opTimeoutMs,
+    });
+  }
+  const showtimeExists = async (id: string) => (await db.primary.showtime.findUnique({ where: { id }, select: { id: true } })) !== null;
+
+  const server = createApp({ logger, db, redis, seats, bookings, rateLimiter, waitingRoom: room, showtimeExists, ...options.extraDeps }).listen(0);
   const address = server.address();
   if (!address || typeof address === 'string') throw new Error('no port');
 
@@ -125,6 +160,7 @@ export async function openStack(options: StackOptions = {}): Promise<Stack> {
     ryow,
     repo,
     bookings,
+    room,
     base: `http://127.0.0.1:${address.port}`,
     logs,
     server,
@@ -192,6 +228,8 @@ export async function clearShowtime(db: DbClients, redis: Redis, showtimeId: str
     // The hold-cap indexes (ADR 0018) live next to the holds and share their hash tag.
     ...(await redis.keys(`hold-owner:{${showtimeId}}:*`)),
     ...(await redis.keys(`hold-addr:{${showtimeId}}:*`)),
+    // The waiting room's keys (ADR 0017), also per showing.
+    ...(await redis.keys(`wr:*:{${showtimeId}}`)),
   ];
   if (keys.length > 0) await redis.del(...keys);
 }

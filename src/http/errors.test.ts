@@ -132,3 +132,47 @@ test('hold_limit_reached is a 409 that carries which cap, how high it is and how
   assert.equal('seatIds' in error, false, 'it is about how many, not which seats');
   assert.deepEqual(headers, {}, 'waiting does not help a cap; releasing seats or the holds lapsing does');
 });
+
+test('the 5d codes: a 403 that says "join the line first", and two retryable 503s that carry a Retry-After', () => {
+  assert.equal(new ApiError('waiting_room_required').status, 403);
+  assert.equal(new ApiError('waiting_room_full').status, 503);
+  assert.equal(new ApiError('server_busy').status, 503);
+
+  const handler = createErrorHandler(createLogger(() => {}));
+  const headers: Record<string, string> = {};
+  const { res } = fakeRes();
+  (res as unknown as { setHeader: (k: string, v: string) => void }).setHeader = (k, v) => {
+    headers[k] = v;
+  };
+  handler(new ApiError('waiting_room_required'), {} as never, res, (() => {}) as never);
+  assert.deepEqual(headers, {}, 'a 403 is not retried on a timer: the app joins the line');
+  handler(new ApiError('server_busy'), {} as never, res, (() => {}) as never);
+  assert.equal(headers['Retry-After'], '10', 'a default when none was chosen');
+  handler(new ApiError('server_busy', { retryAfterSeconds: 14 }), {} as never, res, (() => {}) as never);
+  assert.equal(headers['Retry-After'], '14', 'the jittered value a shed request chose');
+  handler(new ApiError('waiting_room_full'), {} as never, res, (() => {}) as never);
+  assert.equal(headers['Retry-After'], '10');
+  handler(new ApiError('service_unavailable'), {} as never, res, (() => {}) as never);
+  assert.equal(headers['Retry-After'], '5', 'the seat map\'s Redis-down 503 can now be counted down too');
+});
+
+test('a database that could not answer (pool timeout, unreachable) is a 503 server_busy, never a 500, and its message is not sent', () => {
+  const handler = createErrorHandler(createLogger(() => {}));
+  for (const code of ['P2024', 'P1001', 'P1002', 'P1008', 'P1017']) {
+    const headers: Record<string, string> = {};
+    const { res, state } = fakeRes();
+    (res as unknown as { setHeader: (k: string, v: string) => void }).setHeader = (k, v) => {
+      headers[k] = v;
+    };
+    const prismaLike = Object.assign(new Error('Timed out fetching a new connection from the connection pool at postgres://secret-host'), { code });
+    handler(prismaLike, {} as never, res, (() => {}) as never);
+    assert.equal(state.status, 503, code);
+    assert.equal((state.body as { error: { code: string } }).error.code, 'server_busy', code);
+    assert.equal(headers['Retry-After'], '10', code);
+    assert.ok(!JSON.stringify(state.body).includes('secret-host'), `${code}: the message stays server-side`);
+  }
+  // Any other database error is a bug of ours: still a 500 internal_error.
+  const { res, state } = fakeRes();
+  handler(Object.assign(new Error('unique constraint'), { code: 'P2002' }), {} as never, res, (() => {}) as never);
+  assert.equal(state.status, 500);
+});

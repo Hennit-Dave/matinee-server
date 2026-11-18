@@ -1,0 +1,175 @@
+MUTATION CHECKS: can the new tests fail?  (traffic slice 5d, PR 2: waiting room and graceful overload)
+
+Each entry breaks the code in one specific way, runs the tests that should notice (unit + the real-Redis integration tests),
+and restores the file. CAUGHT means they went red and names the tests that noticed. Script: scratchpad only, not committed.
+
+M1 admission ignores the fixed rate: every free slot is filled at once
+   file: src/waitingroom/store.ts
+   CAUGHT: 2 failing test(s) of 20
+     - ADMISSION IS AT A FIXED RATE: with 4 free slots and 5 waiting, one is let in per interval, not all at once
+     - after a long quiet spell at most ONE person is let in at once (no burst), however many waited
+
+M2 no clamp after idle: a long quiet spell lets a whole burst in at once
+   file: src/waitingroom/store.ts
+   CAUGHT: 2 failing test(s) of 20
+     - ADMISSION IS AT A FIXED RATE: with 4 free slots and 5 waiting, one is let in per interval, not all at once
+     - after a long quiet spell at most ONE person is let in at once (no burst), however many waited
+
+M3 the line is not first-in-first-out (the newest is let in first)
+   file: src/waitingroom/store.ts
+   CAUGHT: 2 failing test(s) of 20
+     - people are let in in the order they arrived
+     - THE CLAIM WINDOW: someone let in from the queue who never shows up gives the slot back after 15 s; one who does show up keeps a full window
+
+M4 the room admits one past its cap
+   file: src/waitingroom/store.ts
+   CAUGHT: 17 failing test(s) of 31
+     - past the cap the next arrivals queue FIFO: "0 ahead", "1 ahead", ... and joining again keeps your place
+     - 200 simultaneous joins to a room of 5 admit EXACTLY 5, and the other 195 get 195 different places
+     - ADMISSION IS AT A FIXED RATE: with 4 free slots and 5 waiting, one is let in per interval, not all at once
+     - a user who leaves frees the slot, and the next in line gets it on their next poll
+     - A CLOSED APP FREES ITS SLOT BY ITSELF: a user not heard from for the heartbeat window lapses and the next is let in (no job)
+     ... and 12 more
+
+M5 a silent pass never lapses (a closed app keeps its slot forever)
+   file: src/waitingroom/store.ts
+   CAUGHT: 3 failing test(s) of 31
+     - A CLOSED APP FREES ITS SLOT BY ITSELF: a user not heard from for the heartbeat window lapses and the next is let in (no job)
+     - THE CLAIM WINDOW: someone let in from the queue who never shows up gives the slot back after 15 s; one who does show up keeps a full window
+     - THE SEAT-MAP POLL IS THE HEARTBEAT: polling keeps a pass past the window; going quiet loses it and frees the slot
+
+M6 no hard limit on a pass (a bot could camp a slot for ever)
+   file: src/waitingroom/store.ts
+   CAUGHT: 1 failing test(s) of 20
+     - NO PASS LASTS FOREVER: a user who keeps heartbeating still loses the pass at the hard limit
+
+M7 no claim window: someone let in from the queue who never shows up holds the slot for a full 30 s
+   file: src/waitingroom/store.ts
+   CAUGHT: 1 failing test(s) of 20
+     - THE CLAIM WINDOW: someone let in from the queue who never shows up gives the slot back after 15 s; one who does show up keeps a full window
+
+M8 a waiter who goes silent never loses their place
+   file: src/waitingroom/store.ts
+   CAUGHT: 1 failing test(s) of 20
+     - a waiter silent for the patience window loses their place and everyone behind moves up
+
+M9 a holder does not skip the line
+   file: src/waitingroom/store.ts
+   CAUGHT: 2 failing test(s) of 31
+     - a holder skips the line: someone who still holds seats here is let back in even when the room is full
+     - a HOLDER whose pass lapsed is let back in AHEAD of the line, so seats they hold are not stranded behind it
+
+M10 joining again sends you to the back of the line
+   file: src/waitingroom/store.ts
+   CAUGHT: 3 failing test(s) of 20
+     - past the cap the next arrivals queue FIFO: "0 ahead", "1 ahead", ... and joining again keeps your place
+     - people are let in in the order they arrived
+     - THE CLAIM WINDOW: someone let in from the queue who never shows up gives the slot back after 15 s; one who does show up keeps a full window
+
+M11 a seat-map poll does not renew the pass (touch is read-only)
+   file: src/waitingroom/store.ts
+   CAUGHT: 4 failing test(s) of 31
+     - a heartbeat (touch) keeps a pass alive indefinitely inside the window
+     - THE CLAIM WINDOW: someone let in from the queue who never shows up gives the slot back after 15 s; one who does show up keeps a full window
+     - NO PASS LASTS FOREVER: a user who keeps heartbeating still loses the pass at the hard limit
+     - THE SEAT-MAP POLL IS THE HEARTBEAT: polling keeps a pass past the window; going quiet loses it and frees the slot
+
+M12 the line has no maximum
+   file: src/waitingroom/store.ts
+   CAUGHT: 1 failing test(s) of 20
+     - the line has a maximum: past it joining is refused (bounds Redis memory under abuse)
+
+M13 the room's keys are never given a TTL
+   file: src/waitingroom/store.ts
+   CAUGHT: 1 failing test(s) of 20
+     - EVERY key has a TTL (RULES C4), longer than anything it holds, so an abandoned showing disappears entirely
+
+M14 the gate FAILS CLOSED: a room that errors refuses everyone
+   file: src/waitingroom/waitingRoom.ts
+   CAUGHT: 4 failing test(s) of 22
+     - FAIL OPEN, a store that throws: the seat map and holds still work for someone with no pass, and joining says "admitted"
+     - FAIL OPEN, a store that never answers: the request waits only the 150 ms-class deadline, then goes through
+     - FAIL OPEN, a REAL Redis stall: the gate gives up at its deadline and lets the request through; the seat map's own read then waits the stall out (one c
+     - GATE FAILS OPEN: a store that errors lets the request through
+
+M15 joining fails closed: a room that errors throws instead of letting people in
+   file: src/waitingroom/waitingRoom.ts
+   CAUGHT: 2 failing test(s) of 22
+     - FAIL OPEN, a store that throws: the seat map and holds still work for someone with no pass, and joining says "admitted"
+     - FAIL OPEN: a store that throws, hangs or rejects late lets the user in, and logs ONE warning per 10 s
+
+M16 the gate runs BEFORE the rate limit on holds (a refused flood still costs the room a call)
+   file: src/bookings/routes.ts
+   CAUGHT: 1 failing test(s) of 14
+     - the RATE LIMIT runs before the gate: a refused request costs the room nothing
+
+M17 the gate runs AFTER the body is parsed on holds (a flood without a pass costs a JSON parse)
+   file: src/bookings/routes.ts
+   CAUGHT: 1 failing test(s) of 14
+     - the gate runs BEFORE the body is parsed: a flood without a pass is refused for the price of a header read
+
+M18 releasing seats is gated too (the cleanup path needs a pass)
+   file: src/bookings/routes.ts
+   CAUGHT: 2 failing test(s) of 25
+     - NOT gated: releasing seats and booking (you already hold the seats, which needed the pass)
+     - releasing seats and booking are NOT gated: the cleanup path and the purchase path never need a pass
+
+M19 the seat map is not gated
+   file: src/showtimes/seatRoutes.ts
+   CAUGHT: 8 failing test(s) of 25
+     - GATED: the seat map and taking a hold need a pass; without one the answer is 403 and the service is never asked
+     - WITH a pass the map is served, and the gate is what renewed the pass (the seat-map poll is the heartbeat)
+     - WITHOUT a pass the seat map and holds are refused 403 waiting_room_required; after joining (instant when there is room) both work
+     - releasing seats and booking are NOT gated: the cleanup path and the purchase path never need a pass
+     - the line, end to end: a full room queues the next user ("0 people ahead"), they are refused the map, and let in when a slot frees
+     ... and 3 more
+
+M20 X-Client-Id is optional on the seat map again
+   file: src/showtimes/seatRoutes.ts
+   CAUGHT: 1 failing test(s) of 6
+     - the seat map needs X-Client-Id: without one it is a 400 and the service is never asked (the waiting room admits installs)
+
+M21 DELETE (leaving, releasing) can be shed
+   file: src/http/loadShed.ts
+   CAUGHT: 1 failing test(s) of 7
+     - NEVER shed: /health and every DELETE (the cleanup paths), even when full
+
+M22 the shed Retry-After is not jittered (every refused client returns together)
+   file: src/http/loadShed.ts
+   CAUGHT: 2 failing test(s) of 7
+     - past the limit a request is refused AT ONCE with 503 server_busy and a Retry-After, while the others still finish
+     - the Retry-After is JITTERED between 5 and 15 s, so refused clients do not all come back in the same second
+
+M23 a finished request never frees its in-flight slot (the server sheds itself to death)
+   file: src/http/loadShed.ts
+   CAUGHT: 2 failing test(s) of 7
+     - the count goes back down: once the slow requests finish, new ones are served again
+     - a client that goes away mid-request does not leak a slot
+
+M24 a database pool timeout is a 500, not a retryable 503
+   file: src/http/errors.ts
+   CAUGHT: 1 failing test(s) of 10
+     - a database that could not answer (pool timeout, unreachable) is a 503 server_busy, never a 500, and its message is not sent
+
+M25 the demo-default flag is never set, so the boot warning could never fire
+   file: src/waitingroom/config.ts
+   CAUGHT: 1 failing test(s) of 5
+     - the defaults are the DEMO values
+
+M26 the load-test profile leaves the waiting room on
+   file: src/waitingroom/config.ts
+   CAUGHT: 1 failing test(s) of 5
+     - the load-test profile turns the room off
+
+M27 the back of a long line is told to wait longer than 15 s between polls (no cap)
+   file: src/waitingroom/store.ts
+   CAUGHT: 1 failing test(s) of 11
+     - pollAfterMs: 3 s for the first 20, then 100 ms more per extra person, never over 15 s
+
+M28 heldCount trusts the index (a released or lapsed hold still counts as held)
+   file: src/bookings/holdStore.ts
+   CAUGHT: 1 failing test(s) of 2
+     - heldCount counts live holds, and not released ones
+
+28 of 28 caught.
+After restoring every file: 100 tests, 100 passed, 0 failed.

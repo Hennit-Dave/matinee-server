@@ -5,7 +5,7 @@ import { RATE_LIMIT_POLICIES, type PolicyName } from './policies.js';
 const names = Object.keys(RATE_LIMIT_POLICIES) as PolicyName[];
 
 test('every policy is usable: a window of at least a second, whole numbers, and an address limit at least the user limit', () => {
-  assert.deepEqual([...names].sort(), ['booking', 'hold', 'search', 'seatsPoll']);
+  assert.deepEqual([...names].sort(), ['booking', 'hold', 'queue', 'search', 'seatsPoll']);
   for (const name of names) {
     const { windowMs, user, ip } = RATE_LIMIT_POLICIES[name];
     assert.ok(Number.isInteger(windowMs) && windowMs >= 1_000, `${name}: window`);
@@ -33,4 +33,12 @@ test('the write routes are strictly tighter than the poll, and booking is tighte
   const { seatsPoll, hold, booking } = RATE_LIMIT_POLICIES;
   assert.ok(hold.user < seatsPoll.user && hold.ip < seatsPoll.ip);
   assert.ok(booking.user < hold.user && booking.ip < hold.ip);
+});
+
+test('the waiting-room policy leaves room for an honest waiter: a 3 s poll is 20 a minute, plus a join and a retry', () => {
+  const { windowMs, user, ip } = RATE_LIMIT_POLICIES.queue;
+  assert.equal(windowMs, 60_000);
+  const fastestPollsPerMinute = 60_000 / 3_000; // the app never polls faster than the server's pollAfterMs of at least 3 s
+  assert.ok(user >= fastestPollsPerMinute * 2, 'an install polling at the fastest rate stays well under its limit');
+  assert.ok(ip >= user * 5, 'several people waiting on one address (a household, a venue) are not refused');
 });

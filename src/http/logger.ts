@@ -36,6 +36,13 @@ const ALLOWED = [
   'limit',
   'held',
   'perOwner',
+  // Traffic slice 5d: the waiting room (ADR 0017) and load shedding.
+  'ahead',
+  'enabled',
+  'inFlight',
+  'maxActive',
+  'admitPerMinute',
+  'maxInFlight',
   'perAddress',
   'profile',
   'note',
