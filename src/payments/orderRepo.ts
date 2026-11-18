@@ -61,12 +61,27 @@ export class IdempotencyKeyConflictError extends Error {
 export interface OrderRepo {
   findByOwnerIdempotencyKey(ownerId: string, idempotencyKey: string): Promise<OrderRecord | null>;
   findByPaymentIntentId(paymentIntentId: string): Promise<OrderRecord | null>;
+  findByReference(reference: string): Promise<OrderRecord | null>;
   /** Throws `IdempotencyKeyConflictError` when the (owner, key) pair is already taken. */
   createOrder(input: NewOrder): Promise<OrderRecord>;
   setStatus(orderId: string, status: OrderStatus): Promise<void>;
   /** Appends one money movement. Idempotent: a `stripeObjectId` already on the ledger is a no-op. */
   appendLedger(entry: Omit<LedgerRecord, 'createdAt'>): Promise<'inserted' | 'duplicate'>;
   ledgerFor(orderId: string): Promise<LedgerRecord[]>;
+  /** The venue, showtime and seats a succeeded order booked, for the ticket. `null` when no booking exists yet. */
+  findTicketByReference(reference: string): Promise<TicketData | null>;
+  /** The latest refund's reason for an order, or `null` when nothing was refunded. */
+  refundReason(orderId: string): Promise<string | null>;
+}
+
+/** What the ticket screen needs, joined from the booked seats and the showing's screen and cinema. */
+export interface TicketData {
+  movieId: number;
+  cinemaName: string;
+  screenName: string;
+  format: string;
+  startsAt: Date;
+  seats: { row: string; number: number }[];
 }
 
 const ORDER_SELECT = {
@@ -118,6 +133,14 @@ export function createOrderRepo(db: DbClients): OrderRepo {
     async findByPaymentIntentId(paymentIntentId) {
       const row = await db.primary.order.findUnique({
         where: { stripePaymentIntentId: paymentIntentId },
+        select: ORDER_SELECT,
+      });
+      return row ? toRecord(row as unknown as Record<string, unknown>) : null;
+    },
+
+    async findByReference(reference) {
+      const row = await db.primary.order.findUnique({
+        where: { reference },
         select: ORDER_SELECT,
       });
       return row ? toRecord(row as unknown as Record<string, unknown>) : null;
@@ -182,6 +205,42 @@ export function createOrderRepo(db: DbClients): OrderRepo {
         reason: r.reason,
         createdAt: r.createdAt,
       }));
+    },
+
+    async findTicketByReference(reference) {
+      const bookings = await db.primary.booking.findMany({
+        where: { reference },
+        select: { showtimeId: true, seat: { select: { row: true, number: true } } },
+      });
+      if (bookings.length === 0) return null;
+      const showtime = await db.primary.showtime.findUnique({
+        where: { id: bookings[0]!.showtimeId },
+        select: {
+          movieId: true,
+          startsAt: true,
+          screen: { select: { name: true, format: true, cinema: { select: { name: true } } } },
+        },
+      });
+      if (!showtime) return null;
+      return {
+        movieId: showtime.movieId,
+        cinemaName: showtime.screen.cinema.name,
+        screenName: showtime.screen.name,
+        format: showtime.screen.format,
+        startsAt: showtime.startsAt,
+        seats: bookings
+          .map((b) => ({ row: b.seat.row, number: b.seat.number }))
+          .sort((a, b) => (a.row === b.row ? a.number - b.number : a.row < b.row ? -1 : 1)),
+      };
+    },
+
+    async refundReason(orderId) {
+      const refund = await db.primary.ledgerEntry.findFirst({
+        where: { orderId, kind: 'refund' },
+        orderBy: { createdAt: 'desc' },
+        select: { reason: true },
+      });
+      return refund?.reason ?? null;
     },
   };
 }

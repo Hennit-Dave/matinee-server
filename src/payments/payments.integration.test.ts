@@ -5,6 +5,7 @@ import { createCheckoutService } from './checkoutService.js';
 import { createStripeEventRepo } from './eventRepo.js';
 import { createFakePaymentGateway } from './fakes.js';
 import { createOrderRepo } from './orderRepo.js';
+import { createOrderStatusService } from './orderStatus.js';
 import { handlePaymentSucceeded } from './processor.js';
 import { createWebhookService, WEBHOOK_EVENT_PAYMENT_SUCCEEDED } from './webhookService.js';
 
@@ -23,7 +24,8 @@ function wire(db: Stack['db'], bookings: Stack['bookings']) {
   const checkout = createCheckoutService({ repo: orderRepo, gateway, bookings });
   const webhook = createWebhookService({ gateway, events: eventRepo, enqueue: async (name, data, jobId) => { enqueued.push({ name, data, jobId }); } });
   const process = (eventId: string, paymentIntentId: string) => handlePaymentSucceeded({ repo: orderRepo, gateway, bookings, events: eventRepo }, { eventId, paymentIntentId });
-  return { gateway, orderRepo, eventRepo, enqueued, checkout, webhook, process };
+  const orderStatus = createOrderStatusService({ repo: orderRepo, movies: { detail: async () => ({ movie: { title: 'Dune' } as never, cache: 'hit' }) } });
+  return { gateway, orderRepo, eventRepo, enqueued, checkout, webhook, process, orderStatus };
 }
 
 test('hold -> checkout -> webhook -> worker: the booking is confirmed and the charge is in the ledger', { skip }, async () => {
@@ -104,6 +106,63 @@ test('a re-delivered webhook enqueues the job once (event-id dedup, not the chec
     await p.webhook.handle({ rawBody: Buffer.from('{}'), signatureHeader: 't=1,v1=x' });
 
     assert.equal(p.enqueued.length, 1, 'the same Stripe event is enqueued exactly once');
+  } finally {
+    await stack.close();
+  }
+});
+
+test('the confirmation poll: after the worker confirms, GET /orders/:reference is succeeded with the ticket, scoped to the owner', { skip }, async () => {
+  const stack = await openStack();
+  try {
+    const { showtimeId, seatIds } = await freshShowtime(stack.db, 2, stack.redis);
+    const alice = ownerId();
+    await stack.bookings.acquireHolds({ showtimeId, ownerId: alice, seatIds });
+
+    const p = wire(stack.db, stack.bookings);
+    await p.checkout.checkout({ showtimeId, ownerId: alice, seatIds, idempotencyKey: 'key-4' });
+    const order = (await p.orderRepo.findByOwnerIdempotencyKey(alice, 'key-4'))!;
+
+    // Before the webhook lands: still requires_payment.
+    assert.deepEqual(await p.orderStatus.status(order.reference, alice), { reference: order.reference, status: 'requires_payment' });
+
+    p.gateway.nextEvent = { id: 'evt_4', type: WEBHOOK_EVENT_PAYMENT_SUCCEEDED, paymentIntentId: order.stripePaymentIntentId };
+    await p.webhook.handle({ rawBody: Buffer.from('{}'), signatureHeader: 't=1,v1=x' });
+    await p.process('evt_4', order.stripePaymentIntentId);
+
+    const status = await p.orderStatus.status(order.reference, alice);
+    assert.equal(status!.status, 'succeeded');
+    assert.equal(status!.ticket!.movieTitle, 'Dune');
+    assert.equal(status!.ticket!.totalFormatted, '£38.50'); // 2 x 1850 + 150
+    assert.equal(status!.ticket!.seats.length, 2);
+
+    // A different caller cannot read someone else's order.
+    assert.equal(await p.orderStatus.status(order.reference, ownerId()), null);
+  } finally {
+    await stack.close();
+  }
+});
+
+test('the confirmation poll on the refund path: refunded with the reason', { skip }, async () => {
+  const stack = await openStack();
+  try {
+    const { showtimeId, seatIds } = await freshShowtime(stack.db, 1, stack.redis);
+    const alice = ownerId();
+    await stack.bookings.acquireHolds({ showtimeId, ownerId: alice, seatIds });
+
+    const p = wire(stack.db, stack.bookings);
+    await p.checkout.checkout({ showtimeId, ownerId: alice, seatIds, idempotencyKey: 'key-5' });
+    const order = (await p.orderRepo.findByOwnerIdempotencyKey(alice, 'key-5'))!;
+    await stack.bookings.releaseHolds({ showtimeId, ownerId: alice, seatIds }); // the hold lapses
+
+    p.gateway.nextEvent = { id: 'evt_5', type: WEBHOOK_EVENT_PAYMENT_SUCCEEDED, paymentIntentId: order.stripePaymentIntentId };
+    await p.webhook.handle({ rawBody: Buffer.from('{}'), signatureHeader: 't=1,v1=x' });
+    await p.process('evt_5', order.stripePaymentIntentId);
+
+    assert.deepEqual(await p.orderStatus.status(order.reference, alice), {
+      reference: order.reference,
+      status: 'refunded',
+      refundReason: 'hold_lapsed_refund',
+    });
   } finally {
     await stack.close();
   }
