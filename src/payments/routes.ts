@@ -1,5 +1,5 @@
 import express, { Router } from 'express';
-import type { z } from 'zod';
+import { z } from 'zod';
 import { SeatIdsBodySchema } from '../bookings/booking.js';
 import { clientIdHeader } from '../http/clientId.js';
 import { ApiError } from '../http/errors.js';
@@ -9,14 +9,18 @@ import { validateRequest } from '../http/validate.js';
 import type { LimitFactory } from '../ratelimit/limiter.js';
 import { ShowtimeIdParamsSchema } from '../showtimes/seat.js';
 import type { CheckoutService } from './checkoutService.js';
+import type { OrderStatusService } from './orderStatus.js';
 import type { WebhookService } from './webhookService.js';
 
 /**
  * Payment routes (ADR 0019). The checkout is mounted under /showtimes next to holds and bookings; the webhook
- * is a top-level route with a RAW body for signature verification (never the global JSON parser).
+ * is a top-level route with a RAW body for signature verification (never the global JSON parser); the order
+ * status is a top-level GET that the confirmation poll reads.
  */
 
 const IDEMPOTENCY_KEY_HEADER = 'idempotency-key';
+
+const OrderReferenceParamsSchema = z.strictObject({ reference: z.uuid() });
 
 export function createCheckoutRouter(service: CheckoutService, limit: LimitFactory): Router {
   const router = Router();
@@ -70,6 +74,28 @@ export function createStripeWebhookRouter(service: WebhookService): Router {
     await service.handle({ rawBody, signatureHeader });
     res.json({ received: true });
   });
+
+  return router;
+}
+
+export function createOrderStatusRouter(service: OrderStatusService, limit: LimitFactory): Router {
+  const router = Router();
+  router.use(recordRouteBase);
+
+  // GET /orders/:reference — the confirmation poll (payments P2). Owner-scoped: a reference owned by someone
+  // else is a 404, never a leak. Not load-shed (a paid caller must always learn their outcome) and never cached.
+  router.get(
+    '/orders/:reference',
+    clientIdHeader({ required: true }),
+    limit('orderStatus'),
+    validateRequest({ params: OrderReferenceParamsSchema }),
+    async (req, res) => {
+      const { reference } = req.validated!.params as z.output<typeof OrderReferenceParamsSchema>;
+      const result = await service.status(reference, String(res.locals.clientId));
+      if (!result) throw new ApiError('not_found');
+      res.json(result);
+    },
+  );
 
   return router;
 }

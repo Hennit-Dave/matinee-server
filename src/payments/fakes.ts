@@ -1,4 +1,4 @@
-import type { OrderRecord, OrderRepo, OrderStatus } from './orderRepo.js';
+import type { OrderRecord, OrderRepo, OrderStatus, TicketData } from './orderRepo.js';
 import type { PaymentGateway, PaymentIntentResult, StripeEvent } from './stripe.js';
 import type { StripeEventRepo } from './eventRepo.js';
 
@@ -65,6 +65,8 @@ export interface FakeOrderRepo extends OrderRepo {
   orders: Map<string, OrderRecord>; // keyed by id
   ledger: { orderId: string; kind: string; amountCents: number; stripeObjectId: string; reason: string }[];
   nextStatus: Record<string, OrderStatus>;
+  /** reference -> the ticket the status service should see (set by a test; absent = no booking yet). */
+  ticketByReference: Map<string, TicketData>;
 }
 
 export function createFakeOrderRepo(): FakeOrderRepo {
@@ -72,11 +74,15 @@ export function createFakeOrderRepo(): FakeOrderRepo {
     orders: new Map(),
     ledger: [],
     nextStatus: {},
+    ticketByReference: new Map(),
     async findByOwnerIdempotencyKey(ownerId, idempotencyKey) {
       return [...repo.orders.values()].find((o) => o.ownerId === ownerId && o.idempotencyKey === idempotencyKey) ?? null;
     },
     async findByPaymentIntentId(paymentIntentId) {
       return [...repo.orders.values()].find((o) => o.stripePaymentIntentId === paymentIntentId) ?? null;
+    },
+    async findByReference(reference) {
+      return [...repo.orders.values()].find((o) => o.reference === reference) ?? null;
     },
     async createOrder(input) {
       const order: OrderRecord = {
@@ -103,6 +109,16 @@ export function createFakeOrderRepo(): FakeOrderRepo {
       return repo.ledger
         .filter((l) => l.orderId === orderId)
         .map((l) => ({ ...l, kind: l.kind as 'charge' | 'refund', stripeEventId: null, createdAt: new Date() }));
+    },
+    async findTicketByReference(reference) {
+      const ticket = repo.ticketByReference.get(reference);
+      if (!ticket) return null;
+      // Mirrors the real repo: seats come back sorted by row, then number.
+      return { ...ticket, seats: [...ticket.seats].sort((a, b) => (a.row === b.row ? a.number - b.number : a.row < b.row ? -1 : 1)) };
+    },
+    async refundReason(orderId) {
+      const refunds = repo.ledger.filter((l) => l.orderId === orderId && l.kind === 'refund');
+      return refunds.at(-1)?.reason ?? null;
     },
   };
   return repo;

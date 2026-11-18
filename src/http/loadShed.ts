@@ -10,7 +10,9 @@ import type { Logger } from './logger.js';
  * A request over the limit is refused at once with `503 server_busy` and a `Retry-After` of 5 to 15 seconds, JITTERED so the clients
  * that were refused do not all come back in the same second. The app shows "We're very busy right now ... Trying again in 0:14".
  *
- * Never shed: `GET /health` (the host's probe) and every DELETE (releasing seats, leaving the line: the cleanup paths, which also free capacity).
+ * Never shed: `GET /health` (the host's probe), every DELETE (releasing seats, leaving the line: the cleanup paths, which
+ * also free capacity), and `GET /orders/:reference` (payments P2, ADR 0019: a caller who has already paid must always be
+ * able to learn their outcome, so the confirmation poll is never refused under load).
  * The count is per process and is CHOSEN, NOT MEASURED (5e measures where the real knee is).
  */
 export const DEFAULT_MAX_IN_FLIGHT = 250;
@@ -39,7 +41,7 @@ export function createLoadShedder(options: LoadShedOptions): RequestHandler & { 
   let lastWarned: number | undefined;
 
   const handler: RequestHandler = (req, res, next) => {
-    if (maxInFlight <= 0 || req.method === 'DELETE' || req.path === '/health') {
+    if (maxInFlight <= 0 || req.method === 'DELETE' || req.path === '/health' || req.path.startsWith('/orders/')) {
       next();
       return;
     }

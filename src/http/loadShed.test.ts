@@ -19,6 +19,7 @@ function boot(maxInFlight: number, random = () => 0) {
     gates.push(() => res.json({ ok: true }));
   });
   app.delete('/holds', (_req, res) => void res.json({ released: [] }));
+  app.get('/orders/:reference', (_req, res) => void res.json({ reference: 'x', status: 'succeeded' }));
   app.use(createErrorHandler(logger));
   const server: Server = app.listen(0);
   const address = server.address();
@@ -111,7 +112,7 @@ test('a client that goes away mid-request does not leak a slot', async () => {
   }
 });
 
-test('NEVER shed: /health and every DELETE (the cleanup paths), even when full', async () => {
+test('NEVER shed: /health, every DELETE (the cleanup paths) and the order status, even when full', async () => {
   const app = boot(1);
   try {
     const held = testFetch(`${app.base}/slow`);
@@ -119,6 +120,7 @@ test('NEVER shed: /health and every DELETE (the cleanup paths), even when full',
     assert.equal((await testFetch(`${app.base}/slow`)).status, 503, 'the room is full');
     assert.equal((await testFetch(`${app.base}/health`)).status, 200);
     assert.equal((await testFetch(`${app.base}/holds`, { method: 'DELETE' })).status, 200);
+    assert.equal((await testFetch(`${app.base}/orders/abc`)).status, 200, 'a paid caller always learns their outcome');
     app.release();
     await held;
   } finally {

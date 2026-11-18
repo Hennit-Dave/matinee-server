@@ -16,7 +16,7 @@
  */
 import type { TrafficProfile } from '../traffic/profile.js';
 
-export type PolicyName = 'seatsPoll' | 'hold' | 'booking' | 'search' | 'queue' | 'checkout';
+export type PolicyName = 'seatsPoll' | 'hold' | 'booking' | 'search' | 'queue' | 'checkout' | 'orderStatus';
 
 export interface RateLimitPolicy {
   /** Length of the sliding window. */
@@ -58,6 +58,12 @@ export const RATE_LIMIT_POLICIES: Readonly<Record<PolicyName, RateLimitPolicy>> 
    * retries with the same key: the same strictness as booking, on the route that starts the charge.
    */
   checkout: { windowMs: MINUTE_MS, user: 5, ip: 20 },
+  /**
+   * GET /orders/:reference (ADR 0019, payments P2). The confirmation poll asks every ~2 s until the order
+   * resolves, and a paid caller must always be able to learn their outcome — so it is as generous as the
+   * seat-map poll, the one read the app legitimately hammers. The order id is a UUID, not a secret.
+   */
+  orderStatus: { windowMs: MINUTE_MS, user: 60, ip: 300 },
 };
 
 /**

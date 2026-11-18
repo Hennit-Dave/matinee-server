@@ -128,6 +128,7 @@ never by the checkout call itself.
 | Route | Does | Returns / refusals |
 |---|---|---|
 | `POST /showtimes/:id/checkout` `{ seatIds }` + `Idempotency-Key` | Verifies the caller still holds every seat, prices the order server-side (seats **+ £1.50**), creates the PaymentIntent, returns its `client_secret` | `201 { reference, clientSecret, seatTotalCents, feeCents, totalCents, totalFormatted, currency, status }` · `409 seat_not_held` · `409 idempotency_mismatch` · `503 payment_unavailable` |
+| `GET /orders/:reference` + `X-Client-Id` | The confirmation poll (P2): the order's `requires_payment \| succeeded \| refunded \| failed`, plus the ticket (on `succeeded`) or the refund reason (on `refunded`). Owner-scoped: someone else's order is a 404. Read from the primary, never cached, never load-shed, never waiting-room-gated. | `200 { reference, status, ticket?, refundReason? }` · `404 not_found` |
 | `POST /webhooks/stripe` (raw body) | Verifies the Stripe signature, records the event id (dedup), enqueues the job, returns 200 fast | `200 { received: true }` |
 
 - **Idempotency.** The `Idempotency-Key` header makes a repeated checkout return the SAME PaymentIntent (no second

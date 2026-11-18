@@ -13,6 +13,7 @@ import { createMovieService } from '../movies/service.js';
 import { createCheckoutService, type CheckoutService } from '../payments/checkoutService.js';
 import { createStripeEventRepo } from '../payments/eventRepo.js';
 import { createOrderRepo } from '../payments/orderRepo.js';
+import { createOrderStatusService, type OrderStatusService } from '../payments/orderStatus.js';
 import { createStripeGateway } from '../payments/stripe.js';
 import { createWebhookService, type WebhookService } from '../payments/webhookService.js';
 import { createRateLimiter } from '../ratelimit/limiter.js';
@@ -130,6 +131,7 @@ const bookings = createBookingService({ repo: bookingRepo, holds, ryow, logger }
 const stripeConfig = readStripeConfig();
 let checkout: CheckoutService | undefined;
 let webhook: WebhookService | undefined;
+let orderStatus: OrderStatusService | undefined;
 let paymentQueue: PaymentQueue | undefined;
 let bullMq: Redis | undefined;
 if (stripeConfig.secretKey && stripeConfig.webhookSecret) {
@@ -140,8 +142,9 @@ if (stripeConfig.secretKey && stripeConfig.webhookSecret) {
   paymentQueue = createPaymentQueue(bullMq);
   checkout = createCheckoutService({ repo: orderRepo, gateway, bookings, logger });
   webhook = createWebhookService({ gateway, events: eventRepo, enqueue: (name, data, jobId) => paymentQueue!.add(name, data, jobId), logger });
+  orderStatus = createOrderStatusService({ repo: orderRepo, movies, logger });
 } else {
-  logger.warn('payments_disabled', { note: 'STRIPE_SECRET_KEY and STRIPE_WEBHOOK_SECRET are not both set; checkout and the webhook are not mounted.' });
+  logger.warn('payments_disabled', { note: 'STRIPE_SECRET_KEY and STRIPE_WEBHOOK_SECRET are not both set; checkout, the webhook and the order status are not mounted.' });
 }
 
 // Fails open if Redis is down (limiter.ts); the hold store above is the part that fails closed.
@@ -149,7 +152,7 @@ if (stripeConfig.secretKey && stripeConfig.webhookSecret) {
 // keeps the per-install limits (policies.ts, ADR 0016's open item).
 const rateLimiter = createRateLimiter({ store: createRedisRateLimitStore(redis), logger, policies: policiesForProfile(holdCaps.profile) });
 
-const app = createApp({ logger, db, redis, movies, showtimes, seats, bookings, checkout, webhook, rateLimiter, waitingRoom, showtimeExists, maxInFlight: overload.maxInFlight });
+const app = createApp({ logger, db, redis, movies, showtimes, seats, bookings, checkout, webhook, orderStatus, rateLimiter, waitingRoom, showtimeExists, maxInFlight: overload.maxInFlight });
 
 const server = app.listen(port, () => {
   logger.info('api_listening', { port });

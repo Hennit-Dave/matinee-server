@@ -18,7 +18,8 @@ import type { ShowtimeService } from '../showtimes/showtime.js';
 import { createQueueRouter } from '../waitingroom/routes.js';
 import type { WaitingRoom } from '../waitingroom/waitingRoom.js';
 import type { CheckoutService } from '../payments/checkoutService.js';
-import { createCheckoutRouter, createStripeWebhookRouter } from '../payments/routes.js';
+import { createCheckoutRouter, createOrderStatusRouter, createStripeWebhookRouter } from '../payments/routes.js';
+import type { OrderStatusService } from '../payments/orderStatus.js';
 import type { WebhookService } from '../payments/webhookService.js';
 
 export interface AppDeps {
@@ -39,6 +40,8 @@ export interface AppDeps {
   checkout?: CheckoutService;
   /** The Stripe webhook (ADR 0019), mounted under /webhooks. When absent the route is not mounted. */
   webhook?: WebhookService;
+  /** The confirmation poll (payments P2), mounted under /orders. When absent the route is not mounted. */
+  orderStatus?: OrderStatusService;
   /**
    * Required, not optional: forgetting it must be a compile error, not a server that silently has no limits
    * (ADR 0016). Tests that are not about limiting pass `noRateLimit`.
@@ -91,6 +94,9 @@ export function createApp(deps: AppDeps) {
   }
   if (deps.webhook) {
     app.use('/webhooks', createStripeWebhookRouter(deps.webhook));
+  }
+  if (deps.orderStatus) {
+    app.use(createOrderStatusRouter(deps.orderStatus, limit));
   }
 
   app.use(notFoundHandler);
