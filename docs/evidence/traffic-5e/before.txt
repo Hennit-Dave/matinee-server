@@ -1,0 +1,39 @@
+BEFORE: the per-address rate limits refuse the 500-VU burst before it measures anything (traffic slice 5e, the k6 headline)
+
+Code:    branch feat/traffic-5e, BEFORE the rate-limit scaling change. TRAFFIC_PROFILE=loadtest turns the waiting room OFF, the load
+         shedding OFF and lifts the ADDRESS hold cap — but it does NOT yet touch the rate limiter (ADR 0016's open item). So the
+         rate limits are the shipped ones: hold 10/install + 40/address per minute, booking 5/install + 20/address per minute.
+Server:  the real src/api/main.ts built (dist/) over a throwaway Postgres 16 (54329) and Redis 8 (6391), PORT=3001. Dave's own
+         Postgres, Redis, Neon and Railway were not touched.
+Probe:   load-tests/seat-contention.js — 500 VUs, 1 iteration each, each holding seatIds[(VU-1) % 50] then confirming on 201.
+Suite:   npm run lint (exit 0), npm run typecheck (exit 0).
+
+---- k6: 500 VUs, the same 50 seats, hold -> confirm (before the scaling change) ----
+
+     hold_201................: 27
+     hold_409_seat_taken.....: 13
+     booking_201.............: 20
+     unexpected..............: 467     <- 460 hold requests + 7 bookings refused with 429 rate_limited
+     http_req_failed.........: 90.90% (480 of 528)
+
+     http_req_duration.......: med 0.56 ms, p95 3.38 ms, p99 6.87 ms
+     hold_duration...........: med 0.55 ms, p95 1.71 ms, p99 4.72 ms
+     booking_duration........: med 2.40 ms, p95 8.24 ms, p99 9.26 ms
+
+   THRESHOLD: unexpected = 467 (count===0 crossed) — the run FAILS, on purpose.
+
+---- the database after the run ----
+     bookings: total 20, distinct seats 20.  Not 50: the address booking limit (20/min) stopped the rest before the unique key
+     was ever asked to decide anything.
+
+---- the server log (the refusals) ----
+     {"msg":"request","route":"/showtimes/:id/holds","status":429,"outcome":"rejected","errorCode":"rate_limited","policy":"hold","scope":"ip"}
+     {"msg":"request","route":"/showtimes/:id/bookings","status":429,"outcome":"rejected","errorCode":"rate_limited","policy":"booking","scope":"ip"}
+
+READ THIS AS:
+  The load test sends 500 users from ONE address at the SAME 50 seats. The per-ADDRESS rate limits (hold 40/min, booking 20/min)
+  are right in production — they are the backstop against one address hoarding — and they refuse this test before the hold logic
+  runs, so the run cannot prove the no-double-booking guarantee. 460 hold attempts and 7 of the 27 hold-winners' bookings are
+  refused with 429, and only 20 bookings land. That is exactly the gap ADR 0016 handed to 5e ("the load test sends 500 users from
+  one address, which the address limits will refuse; 5e needs a way to lift them"): the profile must lift the per-ADDRESS limits
+  while keeping the per-install limits (each of the 500 users is its own install doing one honest hold + booking).
