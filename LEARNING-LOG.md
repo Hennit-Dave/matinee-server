@@ -38,3 +38,6 @@ What clicked for me was that Redis gives users a fast, temporary hold, but the d
 
 What clicked for me was that fail-open and fail-closed depend on which mistake would cause more harm. I chose to refuse bookings when holds cannot be checked, but let requests pass when the rate limiter fails so its outage does not block the whole API. That preserves some availability at the cost of temporarily losing throttling, while Postgres still enforces the no-double-booking rule.
 
+## Slice 5d · Waiting room without a background worker — 2026-11-18
+
+What clicked for me was that the waiting room did not need a constantly running background worker. Existing seat-map polls act as heartbeats, and users stop counting as active after about 30 seconds without checking in. Queue requests trigger admissions based on elapsed time and the configured rate, while each operation removes outdated entries and key expiry clears leftover data. The seat-holding cap also counts only holds that still exist, so expired holds stop counting automatically. I learned to check whether existing requests and expiry rules can handle the work before adding another service to run and maintain. 
