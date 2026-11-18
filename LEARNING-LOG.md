@@ -41,3 +41,7 @@ What clicked for me was that fail-open and fail-closed depend on which mistake w
 ## Slice 5d · Waiting room without a background worker — 2026-11-18
 
 What clicked for me was that the waiting room did not need a constantly running background worker. Existing seat-map polls act as heartbeats, and users stop counting as active after about 30 seconds without checking in. Queue requests trigger admissions based on elapsed time and the configured rate, while each operation removes outdated entries and key expiry clears leftover data. The seat-holding cap also counts only holds that still exist, so expired holds stop counting automatically. I learned to check whether existing requests and expiry rules can handle the work before adding another service to run and maintain. 
+
+## Slice 5e · Load test — the bottleneck below the code — 2026-11-18
+
+What surprised me was that the small database pool held up because Redis limited booking attempts to the users who won a seat hold. The connection failures happened before requests reached the app, showing me that bottlenecks can sit below my code. I learned to measure each layer and record test conditions clearly: staggering arrivals helped the local test run, but it was not the same as handling 500 simultaneous connections.
