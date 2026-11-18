@@ -44,6 +44,12 @@ export interface BookingRepo {
   soldSeatIdsForShowtime(source: ReadSource, showtimeId: string): Promise<string[]>;
   /** One INSERT for all the rows: all of them or none. Throws `SeatAlreadyBookedError` on a unique violation. */
   createBookings(rows: readonly NewBooking[]): Promise<void>;
+  /**
+   * The seats already booked under one reference, or `null` when none are. This is how a retried webhook job
+   * makes `confirmBooking` idempotent: if the reference already produced bookings, it returns them instead of
+   * re-inserting (which the unique key would turn into a spurious `seat_taken`).
+   */
+  findBookingByReference(reference: string): Promise<ShowtimeSeats | null>;
 }
 
 /**
@@ -95,6 +101,19 @@ export function createBookingRepo(db: DbClients): BookingRepo {
         if (isUniqueViolation(err)) throw new SeatAlreadyBookedError();
         throw err;
       }
+    },
+
+    async findBookingByReference(reference) {
+      const rows = await db.primary.booking.findMany({
+        where: { reference },
+        select: { showtimeId: true, seatId: true, priceCents: true, seat: { select: { row: true, number: true } } },
+      });
+      if (rows.length === 0) return null;
+      return {
+        showtimeId: rows[0]!.showtimeId,
+        priceCents: rows[0]!.priceCents,
+        seats: rows.map((r) => ({ id: r.seatId, row: r.seat.row, number: r.seat.number })),
+      };
     },
   };
 }

@@ -32,10 +32,19 @@ export interface BookingService {
   acquireHolds(request: SeatRequest): Promise<HoldResponse>;
   releaseHolds(request: SeatRequest): Promise<ReleaseResponse>;
   /**
-   * Turns the caller's holds into bookings. THE durable unit of the booking flow: today an HTTP route calls
-   * it directly; when payments land, the verified-webhook job calls the same function and the route goes.
+   * Turns the caller's holds into bookings. THE durable unit of the booking flow: the direct `/bookings` route
+   * calls it for the load test, and the verified-webhook job calls it for a real payment (ADR 0019). When
+   * `options.reference` is given (the job passes the order's reference), the call is idempotent: if that
+   * reference already produced bookings, they are returned instead of re-inserting.
    */
-  confirmBooking(request: SeatRequest): Promise<BookingResponse>;
+  confirmBooking(request: SeatRequest, options?: { reference?: string }): Promise<BookingResponse>;
+  /**
+   * The "you may proceed" gate shared with checkout: the showtime exists, every seat is in its screen, and the
+   * caller still holds every seat. Returns the showtime's seats (with the current per-seat price) so the caller
+   * can price an order. Throws `not_found`, `validation_failed`, `seat_not_held` or `holds_unavailable`, exactly
+   * as `confirmBooking` would.
+   */
+  verifyHolds(request: SeatRequest): Promise<ShowtimeSeats>;
 }
 
 export interface BookingServiceDeps {
@@ -81,6 +90,23 @@ export function createBookingService(deps: BookingServiceDeps): BookingService {
     if (found.seats.length !== new Set(request.seatIds).size) {
       throw new ApiError('validation_failed', { details: [{ path: 'seatIds', code: 'not_in_screen' }] });
     }
+    return found;
+  }
+
+  /**
+   * The shared "you may proceed" check: the showtime exists, the seats are in its screen, and the caller holds
+   * every one of them (the fast path `confirmBooking` uses). Reads the price from the primary, the current one.
+   */
+  async function verifyHoldsUnlogged(request: SeatRequest): Promise<ShowtimeSeats> {
+    const found = await checkSeats('primary', request);
+    let held: Set<string>;
+    try {
+      held = new Set(await holds.heldBy(request.showtimeId, request.ownerId, request.seatIds));
+    } catch (err) {
+      throw unavailable(err, request);
+    }
+    const notHeld = request.seatIds.filter((id) => !held.has(id));
+    if (notHeld.length > 0) throw new ApiError('seat_not_held', { seatIds: notHeld });
     return found;
   }
 
@@ -184,24 +210,18 @@ export function createBookingService(deps: BookingServiceDeps): BookingService {
         }
       }),
 
-    confirmBooking: (request) =>
+    confirmBooking: (request, options) =>
       logged({ ok: 'booking_confirmed', rejected: 'booking_rejected' }, request, async () => {
         const { showtimeId, ownerId, seatIds } = request;
-        const found = await checkSeats('primary', request);
+        const reference = options?.reference ?? randomUUID();
 
-        // Fast check: the caller must hold every seat. This is NOT what makes double booking impossible (a
-        // hold can lapse a millisecond after this check); the unique key below is. It makes the common
-        // failure, "your hold ran out", a clear 409 instead of a race.
-        let held: Set<string>;
-        try {
-          held = new Set(await holds.heldBy(showtimeId, ownerId, seatIds));
-        } catch (err) {
-          throw unavailable(err, request);
-        }
-        const notHeld = seatIds.filter((id) => !held.has(id));
-        if (notHeld.length > 0) throw new ApiError('seat_not_held', { seatIds: notHeld });
+        // Idempotent replay: if this reference already produced bookings (a retried webhook job), return them
+        // instead of re-inserting — the unique key would otherwise turn the retry into a spurious `seat_taken`.
+        const existing = await repo.findBookingByReference(reference);
+        if (existing) return finish(request, reference, existing);
 
-        const reference = randomUUID();
+        const found = await verifyHoldsUnlogged(request);
+
         try {
           // One INSERT for every seat: all of them or none.
           await repo.createBookings(
@@ -215,5 +235,8 @@ export function createBookingService(deps: BookingServiceDeps): BookingService {
         }
         return finish(request, reference, found);
       }),
+
+    verifyHolds: (request) =>
+      logged({ ok: 'holds_verified', rejected: 'holds_rejected' }, request, () => verifyHoldsUnlogged(request)),
   };
 }
