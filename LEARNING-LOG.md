@@ -48,3 +48,6 @@ What surprised me was that the small database pool held up because Redis limited
 
 ## Slice P1 · Payments — a successful charge isn't a confirmed booking — 2026-11-18
 What clicked for me was that a successful payment does not automatically mean a confirmed booking. The verified webhook starts that process, and the worker records the charge before trying to deliver the seats. If the hold has expired, P1 refunds the payment, while idempotent processing makes retries safe without creating duplicate bookings or refunds.
+
+## Slice P3 · Payments — refunding a cancelled showing, without paying anyone twice — 2026-11-20
+What clicked for me was that cancelling a showtime could reuse the refund and ledger logic already built for expired holds. Cancellation blocks new bookings, while a background job refunds paid orders, records refunds against their original charges, and removes the bookings. Reusing refund keys and unique ledger entries makes retries safe without refunding twice. Payment confirmation also checks for cancellation, so a payment arriving afterwards is refunded instead of booked. The ledger gives me evidence that each refunded order’s charge and refund balance to zero.
