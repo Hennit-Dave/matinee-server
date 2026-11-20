@@ -7,6 +7,7 @@ import type { Redis } from 'ioredis';
  */
 export const PAYMENT_QUEUE_NAME = 'payments';
 export const JOB_PAYMENT_SUCCEEDED = 'payment.succeeded';
+export const JOB_SHOWTIME_CANCELLED = 'showtime.cancelled';
 
 export interface PaymentQueue {
   add(name: string, data: Record<string, string>, jobId: string): Promise<void>;

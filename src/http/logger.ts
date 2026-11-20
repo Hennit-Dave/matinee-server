@@ -54,6 +54,12 @@ const ALLOWED = [
   'jobId',
   'amountCents',
   'eventType',
+  // Cancelled-showtime refunds (ADR 0020): the settle job's per-run tally.
+  'refunded',
+  'cancelled',
+  'deferred',
+  'skipped',
+  'alreadyCancelled',
 ] as const;
 export type LogField = (typeof ALLOWED)[number];
 export type LogFields = Partial<Record<LogField, string | number | boolean>>;

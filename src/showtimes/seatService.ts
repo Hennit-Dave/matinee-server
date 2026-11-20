@@ -37,7 +37,8 @@ export function createSeatService(db: DbClients, deps: SeatServiceDeps): SeatSer
           },
         },
       });
-      if (!showtime) return null;
+      // A cancelled showing has no bookable seats: the map is gone (ADR 0020), same 404 as an unknown id.
+      if (!showtime || showtime.cancelledAt) return null;
 
       try {
         const source = viewerId && (await deps.ryow.isActive(viewerId)) ? 'primary' : 'replica';

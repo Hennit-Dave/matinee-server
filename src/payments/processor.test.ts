@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import type { BookingResponse } from '../bookings/booking.js';
 import { ApiError } from '../http/errors.js';
 import { createFakeOrderRepo, createFakePaymentGateway, createFakeStripeEventRepo, type FakeOrderRepo } from './fakes.js';
-import { handlePaymentSucceeded, REFUND_REASON_NOT_HELD, REFUND_REASON_SEAT_TAKEN, type PaymentProcessorDeps } from './processor.js';
+import { handlePaymentSucceeded, REFUND_REASON_NOT_HELD, REFUND_REASON_SEAT_TAKEN, REFUND_REASON_SHOWTIME_CANCELLED, type PaymentProcessorDeps } from './processor.js';
 
 const SHOWTIME = '11111111-1111-4111-8111-111111111111';
 const A1 = 'aaaaaaa1-aaaa-4aaa-8aaa-aaaaaaaaaaa1';
@@ -28,7 +28,7 @@ function makeOrder(repo: FakeOrderRepo, overrides: Partial<Parameters<FakeOrderR
   return repo.createOrder(order);
 }
 
-function boot(confirm: () => Promise<BookingResponse>) {
+function boot(confirm: () => Promise<BookingResponse>, cancelled = false) {
   const repo = createFakeOrderRepo();
   const gateway = createFakePaymentGateway();
   const events = createFakeStripeEventRepo();
@@ -39,6 +39,7 @@ function boot(confirm: () => Promise<BookingResponse>) {
     gateway,
     bookings: { confirmBooking: async () => confirm() },
     events,
+    showtime: { isCancelled: async () => cancelled },
   };
   return { repo, gateway, events, deps };
 }
@@ -111,4 +112,31 @@ test('a transient error is re-thrown so BullMQ retries', async () => {
   await assert.rejects(handlePaymentSucceeded(deps, { eventId: EVENT, paymentIntentId: PI }), /database busy/);
   // The charge was recorded first (the money moved), so a retry will replay from there.
   assert.deepEqual(repo.ledger.map((l) => l.kind), ['charge']);
+});
+
+test('a succeeded payment on a cancelled showtime is refunded with the cancellation reason, never booked', async () => {
+  let confirms = 0;
+  const { repo, gateway, deps } = boot(async () => {
+    confirms += 1;
+    return { reference: 'r', showtimeId: SHOWTIME, seats: [], priceCents: 1850, totalCents: 2000, totalFormatted: '£20.00' };
+  }, /* cancelled */ true);
+  const order = await makeOrder(repo);
+  await handlePaymentSucceeded(deps, { eventId: EVENT, paymentIntentId: PI });
+  assert.equal(confirms, 0, 'no booking is confirmed on a cancelled showing');
+  assert.equal(order.status, 'refunded');
+  assert.deepEqual(repo.ledger.map((l) => l.kind), ['charge', 'refund']);
+  assert.equal(repo.ledger[1]!.reason, REFUND_REASON_SHOWTIME_CANCELLED);
+  assert.equal(gateway.refunds.length, 1);
+});
+
+test('confirmBooking throwing showtime_cancelled (the TOCTOU window) is still refunded in one pass', async () => {
+  const { repo, gateway, deps } = boot(async () => {
+    throw new ApiError('showtime_cancelled');
+  }); // the pre-check read false; the cancel landed before confirmBooking's own check threw
+  const order = await makeOrder(repo);
+  await handlePaymentSucceeded(deps, { eventId: EVENT, paymentIntentId: PI });
+  assert.equal(order.status, 'refunded');
+  assert.deepEqual(repo.ledger.map((l) => l.kind), ['charge', 'refund']);
+  assert.equal(repo.ledger[1]!.reason, REFUND_REASON_SHOWTIME_CANCELLED);
+  assert.equal(gateway.refunds.length, 1);
 });

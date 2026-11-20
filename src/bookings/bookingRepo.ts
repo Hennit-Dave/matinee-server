@@ -7,6 +7,10 @@ export interface ShowtimeSeats {
   showtimeId: string;
   /** Per-seat price in pence. */
   priceCents: number;
+  /** Set when the showtime has been cancelled (ADR 0020): every hold/checkout/confirm must be refused. Absent on the
+   *  idempotent `findBookingByReference` replay (which returns bookings, not showtime state) — only `findShowtimeSeats`
+   *  and `checkSeats` read it. */
+  cancelledAt?: Date | null;
   /** Those of the requested seat ids that are physically in this showtime's screen. */
   seats: { id: string; row: string; number: number }[];
 }
@@ -50,6 +54,12 @@ export interface BookingRepo {
    * re-inserting (which the unique key would turn into a spurious `seat_taken`).
    */
   findBookingByReference(reference: string): Promise<ShowtimeSeats | null>;
+  /**
+   * Deletes every booking row under one reference, releasing the seats it owned (ADR 0020). The reverse of
+   * `createBookings`: a refunded/cancelled order's seats become available again. Idempotent — deleting zero rows
+   * is fine. The money truth stays in the order + ledger, never here.
+   */
+  deleteBookingsByReference(reference: string): Promise<number>;
 }
 
 /**
@@ -71,14 +81,14 @@ export function createBookingRepo(db: DbClients): BookingRepo {
       const reader = client(source);
       const showtime = await reader.showtime.findUnique({
         where: { id: showtimeId },
-        select: { id: true, screenId: true, priceCents: true },
+        select: { id: true, screenId: true, priceCents: true, cancelledAt: true },
       });
       if (!showtime) return null;
       const seats = await reader.seat.findMany({
         where: { id: { in: [...seatIds] }, screenId: showtime.screenId },
         select: { id: true, row: true, number: true },
       });
-      return { showtimeId: showtime.id, priceCents: showtime.priceCents, seats };
+      return { showtimeId: showtime.id, priceCents: showtime.priceCents, cancelledAt: showtime.cancelledAt, seats };
     },
 
     async soldSeatIds(showtimeId, seatIds) {
@@ -114,6 +124,11 @@ export function createBookingRepo(db: DbClients): BookingRepo {
         priceCents: rows[0]!.priceCents,
         seats: rows.map((r) => ({ id: r.seatId, row: r.seat.row, number: r.seat.number })),
       };
+    },
+
+    async deleteBookingsByReference(reference) {
+      const { count } = await db.primary.booking.deleteMany({ where: { reference } });
+      return count;
     },
   };
 }

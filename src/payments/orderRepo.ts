@@ -62,6 +62,8 @@ export interface OrderRepo {
   findByOwnerIdempotencyKey(ownerId: string, idempotencyKey: string): Promise<OrderRecord | null>;
   findByPaymentIntentId(paymentIntentId: string): Promise<OrderRecord | null>;
   findByReference(reference: string): Promise<OrderRecord | null>;
+  /** Every order on one showtime, for the cancelled-showtime refund job (ADR 0020). */
+  ordersForShowtime(showtimeId: string): Promise<OrderRecord[]>;
   /** Throws `IdempotencyKeyConflictError` when the (owner, key) pair is already taken. */
   createOrder(input: NewOrder): Promise<OrderRecord>;
   setStatus(orderId: string, status: OrderStatus): Promise<void>;
@@ -144,6 +146,15 @@ export function createOrderRepo(db: DbClients): OrderRepo {
         select: ORDER_SELECT,
       });
       return row ? toRecord(row as unknown as Record<string, unknown>) : null;
+    },
+
+    async ordersForShowtime(showtimeId) {
+      const rows = await db.primary.order.findMany({
+        where: { showtimeId },
+        select: ORDER_SELECT,
+        orderBy: { createdAt: 'asc' },
+      });
+      return rows.map((r) => toRecord(r as unknown as Record<string, unknown>));
     },
 
     async createOrder(input) {

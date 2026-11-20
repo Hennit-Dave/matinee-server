@@ -21,6 +21,8 @@ import type { CheckoutService } from '../payments/checkoutService.js';
 import { createCheckoutRouter, createOrderStatusRouter, createStripeWebhookRouter } from '../payments/routes.js';
 import type { OrderStatusService } from '../payments/orderStatus.js';
 import type { WebhookService } from '../payments/webhookService.js';
+import type { CancelShowtimeService } from '../showtimes/cancelService.js';
+import { createAdminCancelRouter } from '../showtimes/cancelRoutes.js';
 
 export interface AppDeps {
   logger?: Logger;
@@ -42,6 +44,13 @@ export interface AppDeps {
   webhook?: WebhookService;
   /** The confirmation poll (payments P2), mounted under /orders. When absent the route is not mounted. */
   orderStatus?: OrderStatusService;
+  /**
+   * The admin cancel endpoint (ADR 0020), mounted under /admin only when both this service and `adminKey` are
+   * present. When absent the route is not mounted.
+   */
+  cancel?: CancelShowtimeService;
+  /** The server-only secret the cancel endpoint compares against. Never logged; only its presence gates the route. */
+  adminKey?: string;
   /**
    * Required, not optional: forgetting it must be a compile error, not a server that silently has no limits
    * (ADR 0016). Tests that are not about limiting pass `noRateLimit`.
@@ -97,6 +106,9 @@ export function createApp(deps: AppDeps) {
   }
   if (deps.orderStatus) {
     app.use(createOrderStatusRouter(deps.orderStatus, limit));
+  }
+  if (deps.cancel && deps.adminKey) {
+    app.use('/admin', createAdminCancelRouter(deps.cancel, deps.adminKey));
   }
 
   app.use(notFoundHandler);

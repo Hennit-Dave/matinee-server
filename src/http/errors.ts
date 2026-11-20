@@ -23,7 +23,9 @@ export type ErrorCode =
   | 'waiting_room_full'
   | 'server_busy'
   | 'idempotency_mismatch'
-  | 'payment_unavailable';
+  | 'payment_unavailable'
+  | 'showtime_cancelled'
+  | 'invalid_admin_key';
 
 const STATUS: Record<ErrorCode, number> = {
   not_found: 404,
@@ -43,6 +45,8 @@ const STATUS: Record<ErrorCode, number> = {
   server_busy: 503,
   idempotency_mismatch: 409,
   payment_unavailable: 503,
+  showtime_cancelled: 410,
+  invalid_admin_key: 403,
 };
 
 // Safe English defaults for debugging. The app owns user-facing copy and switches on `code`.
@@ -71,6 +75,10 @@ const MESSAGE: Record<ErrorCode, string> = {
   // Payments slice (ADR 0019). The idempotency key was already used with a different payload; payment setup is unavailable right now.
   idempotency_mismatch: 'That request id was already used for a different order.',
   payment_unavailable: 'Payment is temporarily unavailable. Please try again shortly.',
+  // Cancelled showtimes (ADR 0020). The first means "this showing no longer exists for booking" (a 410, permanent);
+  // the second guards the admin cancel endpoint until real auth exists (a wrong or missing admin key).
+  showtime_cancelled: 'This showing has been cancelled.',
+  invalid_admin_key: 'You are not authorised to do that.',
 };
 
 /** Seconds a client should wait before retrying a `holds_unavailable` (sent as `Retry-After`). */

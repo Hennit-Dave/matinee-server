@@ -17,12 +17,13 @@ const seats = [
   { id: S3, row: 'A', number: 3 },
 ];
 
-function setup(layoutSeats = seats) {
+function setup(layoutSeats = seats, cancelledAt: Date | null = null) {
   const showtime = {
     id: SHOWTIME,
     movieId: 7,
     startsAt: new Date('2026-11-20T20:30:00.000Z'),
     priceCents: 1850,
+    cancelledAt,
     screen: { id: 'screen-1', name: 'Screen 1', format: 'Standard', totalSeats: 3, seats: layoutSeats.map((s) => ({ ...s, kind: 'standard' })) },
   };
   // The layout comes from the replica client; everything else goes through the repo fake.
@@ -49,6 +50,13 @@ test('the seat map shows sold from bookings, held from Redis, and sold wins when
 test('an unknown showtime is null (a 404 upstream) and touches neither Redis nor the bookings', async () => {
   const { service, holds, repo } = setup();
   assert.equal(await service.forShowtime('00000000-0000-4000-8000-00000000dead'), null);
+  assert.deepEqual(holds.calls, []);
+  assert.deepEqual(repo.reads, []);
+});
+
+test('a cancelled showtime has no seat map (null), touching neither Redis nor the bookings (ADR 0020)', async () => {
+  const { service, holds, repo } = setup(seats, new Date('2026-11-20T19:00:00.000Z'));
+  assert.equal(await service.forShowtime(SHOWTIME), null);
   assert.deepEqual(holds.calls, []);
   assert.deepEqual(repo.reads, []);
 });
