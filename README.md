@@ -15,7 +15,8 @@ seat map are built (see "Seat map endpoint"); seat holds and bookings are built 
 bookings"), without payments, and rate limiting guards the busy routes (see "Rate limiting").
 The traffic chapter (5a–5e) is done: seat holds, rate limiting, hold caps, the waiting room and graceful
 overload, and the k6 load test that proves a seat is never sold twice (see "Load test", `TRAFFIC.md`,
-`SHARDING.md`). This README is written as the build goes.
+`SHARDING.md`). The deploy slice (Railway + Neon) is configured: see "Deploy" and `ARCHITECTURE.md`. This
+README is written as the build goes.
 
 ## What it is
 
@@ -252,9 +253,58 @@ returns nothing). The waiting-room run proves the cap, the FIFO line and the fix
 users. Full numbers in `load-tests/REPORT.md`; the traffic story is `docs/TRAFFIC.md`; the sharding plan is
 `docs/SHARDING.md`.
 
+## Deploy (Railway + Neon, ADR 0007/0008/0009)
+
+Two services from this one repo, both on Neon Postgres + Railway Redis. The full topology is `ARCHITECTURE.md`.
+
+**Build:** the `Dockerfile` (`node:24`, `npm ci`, `npm run build`; `prisma` CLI kept for the deploy-time migration).
+
+| Service | Start command | Health / exposure |
+|---|---|---|
+| `api` | `npx prisma migrate deploy && node --enable-source-maps dist/api/main.js` | public; healthcheck path **`GET /health`** (load-shed-exempt) |
+| `worker` | `node --enable-source-maps dist/jobs/worker.js` | **portless private service — no public domain, no HTTP healthcheck** |
+
+Migrate-on-API-start is safe only because there is a single `api` instance; if it ever scales horizontally the
+migration moves to a release/pre-deploy phase first (documented in `ARCHITECTURE.md`).
+
+### Environment (names only — Dave sets the values in Railway)
+
+Shared (both services): `DATABASE_URL` (pooled primary) · `DATABASE_READ_URL` (pooled replica) ·
+`DATABASE_DIRECT_URL` (unpooled, migrations only) · `REDIS_URL` (private Railway Redis) · `STRIPE_SECRET_KEY` ·
+`TRAFFIC_PROFILE` (`default`).
+
+API only: `STRIPE_WEBHOOK_SECRET` · `ADMIN_API_KEY` · `TMDB_READ_TOKEN` · `PORT`.
+
+Production tuning: `WAITING_ROOM_MAX_ACTIVE=100` (default 2 is a demo) · `MAX_IN_FLIGHT=250` (real knee set by
+`load-tests/ramp.js`) · the other knobs stay at their defaults (`WAITING_ROOM_ENABLED` on,
+`WAITING_ROOM_ADMIT_PER_MINUTE` 12, hold caps 8/16).
+
+### Dave-run checklist
+
+1. Create the Railway project ("matinee", EU West), link this repo.
+2. Add **two services** (`api`, `worker`) from the repo/Dockerfile; set the start commands above. **The worker
+   must have no public domain and no HTTP healthcheck.**
+3. Set the environment variables (shared at the environment level, API-only at the API service).
+4. Deploy. In the API boot log: `api_listening`, and **no `traffic_profile_loadtest`**, **no
+   `waiting_room_demo_defaults`**.
+5. **Post-deploy sanity:** confirm the **pg SSL deprecation warning is gone** from the log lines **and** the API
+   connects to Neon with no certificate error (`/health` → 200). This is the first real connection — where
+   `sslmode=verify-full` is proven.
+6. Register the Stripe webhook (test mode): `https://<deployed-api>/webhooks/stripe`, event
+   `payment_intent.succeeded`; the signing secret Stripe shows becomes `STRIPE_WEBHOOK_SECRET`.
+7. Prove client-IP resolution against the real edge:
+   `bash docs/evidence/traffic-5c/verify-client-ip.sh https://<deployed-api> spoof` (→ 429 at/before request 41),
+   then `… share` from a second network (→ 400). Save output as `docs/evidence/traffic-5c/railway-edge-check.txt`.
+8. **Last:** the k6 re-run. Temporarily set `TRAFFIC_PROFILE=loadtest` on the API, run the seed + the two scripts
+   against `https://<deployed-api>` (`seat-contention.js`, then `waiting-room.js` with `WAITING_ROOM_ENABLED=true
+   WAITING_ROOM_MAX_ACTIVE=5`), **revert `TRAFFIC_PROFILE=default` immediately**, and **verify the revert in the
+   log** (no `traffic_profile_loadtest`, no `waiting_room_demo_defaults` after the redeploy). Run once — it
+   consumes the Neon free-tier budget. Rate limiting is proven separately by step 7, not the k6 run.
+
 ## Docs
 
 - `docs/RULES.md` — every requirement, as a checklist
+- `docs/ARCHITECTURE.md` — the production topology and deploy-time constraints
 - `docs/TRAFFIC.md` — the traffic-management write-up
 - `docs/SHARDING.md` — the sharding plan (plan only)
 - `docs/decisions/` — architecture decision records
@@ -263,7 +313,7 @@ users. Full numbers in `load-tests/REPORT.md`; the traffic story is `docs/TRAFFI
 
 ## Still to write
 
-Architecture summary · key decisions · app store billing rules (Apple/Google in-app purchase) · what I'd do next
+Key decisions · app store billing rules (Apple/Google in-app purchase) · what I'd do next · Sentry (app + server)
 
 ## Attribution
 
