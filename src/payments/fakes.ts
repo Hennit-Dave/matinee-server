@@ -11,6 +11,10 @@ import type { StripeEventRepo } from './eventRepo.js';
 export interface FakePaymentGateway extends PaymentGateway {
   intents: Map<string, { id: string; clientSecret: string | null; status: string; amountCents: number; currency: string }>;
   refunds: { paymentIntentId: string; idempotencyKey: string; id: string }[];
+  /** PaymentIntent ids `cancelPaymentIntent` has cancelled. */
+  cancelled: string[];
+  /** PaymentIntent ids whose cancellation throws (the "already succeeded, cannot cancel" case). */
+  cancelFails: Set<string>;
   events: StripeEvent[];
   /** When true every call throws, like Stripe being down. */
   down: boolean;
@@ -26,6 +30,8 @@ export function createFakePaymentGateway(): FakePaymentGateway {
   const gateway: FakePaymentGateway = {
     intents: new Map(),
     refunds: [],
+    cancelled: [],
+    cancelFails: new Set(),
     events: [],
     down: false,
     badSignature: false,
@@ -57,6 +63,12 @@ export function createFakePaymentGateway(): FakePaymentGateway {
       gateway.refunds.push({ paymentIntentId, idempotencyKey, id });
       return { id, status: 'succeeded' };
     },
+    async cancelPaymentIntent(paymentIntentId) {
+      if (gateway.down) throw new Error('stripe down');
+      if (gateway.cancelFails.has(paymentIntentId)) throw new Error('this PaymentIntent cannot be cancelled (it already succeeded)');
+      gateway.cancelled.push(paymentIntentId);
+      return { id: paymentIntentId, clientSecret: null, status: 'canceled', amountCents: 0, currency: 'gbp' };
+    },
   };
   return gateway;
 }
@@ -83,6 +95,9 @@ export function createFakeOrderRepo(): FakeOrderRepo {
     },
     async findByReference(reference) {
       return [...repo.orders.values()].find((o) => o.reference === reference) ?? null;
+    },
+    async ordersForShowtime(showtimeId) {
+      return [...repo.orders.values()].filter((o) => o.showtimeId === showtimeId);
     },
     async createOrder(input) {
       const order: OrderRecord = {

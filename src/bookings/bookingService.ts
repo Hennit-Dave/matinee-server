@@ -87,6 +87,9 @@ export function createBookingService(deps: BookingServiceDeps): BookingService {
   async function checkSeats(source: ReadSource, request: SeatRequest): Promise<ShowtimeSeats> {
     const found = await repo.findShowtimeSeats(source, request.showtimeId, request.seatIds);
     if (!found) throw new ApiError('not_found');
+    // A cancelled showing is closed for business (ADR 0020): no new holds, no checkout, no confirm. Checked
+    // before seat membership so a dead showing never prices or books a seat.
+    if (found.cancelledAt) throw new ApiError('showtime_cancelled');
     if (found.seats.length !== new Set(request.seatIds).size) {
       throw new ApiError('validation_failed', { details: [{ path: 'seatIds', code: 'not_in_screen' }] });
     }

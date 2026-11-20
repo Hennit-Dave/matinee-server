@@ -13,6 +13,7 @@ export function createShowtimeService(db: DbClients): ShowtimeService {
         where: {
           movieId,
           startsAt: { gte: from },
+          cancelledAt: null, // a cancelled showing never appears in the list (ADR 0020)
         },
         orderBy: { startsAt: 'asc' },
         include: {

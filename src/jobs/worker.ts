@@ -9,9 +9,11 @@ import { createLogger } from '../http/logger.js';
 import { createStripeEventRepo } from '../payments/eventRepo.js';
 import { createOrderRepo } from '../payments/orderRepo.js';
 import { handlePaymentSucceeded, type PaymentJobPayload } from '../payments/processor.js';
+import { settleCancelledShowtime, type CancelRefundPayload } from '../payments/cancelRefund.js';
 import { createStripeGateway } from '../payments/stripe.js';
+import { createShowtimeCancelRepo } from '../showtimes/cancelRepo.js';
 import { createBullMqConnection, createRedisClient } from './connection.js';
-import { JOB_PAYMENT_SUCCEEDED, PAYMENT_QUEUE_NAME } from './queue.js';
+import { JOB_PAYMENT_SUCCEEDED, JOB_SHOWTIME_CANCELLED, PAYMENT_QUEUE_NAME } from './queue.js';
 
 /**
  * The payment worker (ADR 0019), a SEPARATE always-on process from the API: the webhook enqueues and returns
@@ -50,17 +52,21 @@ const bullMq = createBullMqConnection(logger);
 
 const holds = createRedisHoldStore(redis, { caps: holdCaps.caps });
 const ryow = createRedisRyowStore(redis);
-const bookings = createBookingService({ repo: createBookingRepo(db), holds, ryow, logger });
+const bookingRepo = createBookingRepo(db);
+const bookings = createBookingService({ repo: bookingRepo, holds, ryow, logger });
 
 const gateway = createStripeGateway({ secretKey: stripeSecretKey });
 const orderRepo = createOrderRepo(db);
 const eventRepo = createStripeEventRepo(db);
+const showtime = createShowtimeCancelRepo(db);
 
 const worker = new Worker(
   PAYMENT_QUEUE_NAME,
   async (job) => {
     if (job.name === JOB_PAYMENT_SUCCEEDED) {
-      await handlePaymentSucceeded({ repo: orderRepo, gateway, bookings, events: eventRepo, logger }, job.data as PaymentJobPayload);
+      await handlePaymentSucceeded({ repo: orderRepo, gateway, bookings, events: eventRepo, showtime, logger }, job.data as PaymentJobPayload);
+    } else if (job.name === JOB_SHOWTIME_CANCELLED) {
+      await settleCancelledShowtime({ repo: orderRepo, gateway, bookings: bookingRepo, holds, logger }, job.data as CancelRefundPayload);
     }
     // Any other job kind is acked (nothing to do).
   },

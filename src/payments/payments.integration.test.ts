@@ -8,6 +8,7 @@ import { createOrderRepo } from './orderRepo.js';
 import { createOrderStatusService } from './orderStatus.js';
 import { handlePaymentSucceeded } from './processor.js';
 import { createWebhookService, WEBHOOK_EVENT_PAYMENT_SUCCEEDED } from './webhookService.js';
+import { createShowtimeCancelRepo } from '../showtimes/cancelRepo.js';
 
 /**
  * The payment engine end to end over the REAL Postgres and Redis (a throwaway one; the testkit refuses any
@@ -23,7 +24,7 @@ function wire(db: Stack['db'], bookings: Stack['bookings']) {
   const enqueued: { name: string; data: Record<string, string>; jobId: string }[] = [];
   const checkout = createCheckoutService({ repo: orderRepo, gateway, bookings });
   const webhook = createWebhookService({ gateway, events: eventRepo, enqueue: async (name, data, jobId) => { enqueued.push({ name, data, jobId }); } });
-  const process = (eventId: string, paymentIntentId: string) => handlePaymentSucceeded({ repo: orderRepo, gateway, bookings, events: eventRepo }, { eventId, paymentIntentId });
+  const process = (eventId: string, paymentIntentId: string) => handlePaymentSucceeded({ repo: orderRepo, gateway, bookings, events: eventRepo, showtime: createShowtimeCancelRepo(db) }, { eventId, paymentIntentId });
   const orderStatus = createOrderStatusService({ repo: orderRepo, movies: { detail: async () => ({ movie: { title: 'Dune' } as never, cache: 'hit' }) } });
   return { gateway, orderRepo, eventRepo, enqueued, checkout, webhook, process, orderStatus };
 }

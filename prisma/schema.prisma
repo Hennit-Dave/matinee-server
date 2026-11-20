@@ -68,6 +68,11 @@ model Showtime {
    * Ticket price in minor units (whole integer pence, GBP; RULES A3). Named `priceCents` for historical reasons; renaming needs a migration.
    */
   priceCents Int       @map("price_cents")
+  /**
+   * When this showing was cancelled (ADR 0020). Nullable: a null means the showing is live; a set value is the
+   * single durable source of truth that rejects new holds/checkouts and drives the cancelled-showtime refund job.
+   */
+  cancelledAt DateTime? @map("cancelled_at") @db.Timestamptz(3)
   createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
   screen     Screen    @relation(fields: [screenId], references: [id], onDelete: Cascade)
   bookings   Booking[]

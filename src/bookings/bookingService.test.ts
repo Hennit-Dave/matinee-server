@@ -182,6 +182,39 @@ test('every outcome is logged with the user and showtime, so a booking can be tr
   assert.equal(logs[1]!.requestId, 'req-1');
 });
 
+// ---- Cancelled showtimes (ADR 0020) ---------------------------------------------------------------
+
+function setupCancelled() {
+  const repo = createFakeRepo({
+    showtimes: { [SHOWTIME]: { screenId: 'screen-1', priceCents: 1850, cancelledAt: new Date('2026-11-20T19:00:00.000Z') } },
+    screens: {
+      'screen-1': [
+        { id: A1, row: 'A', number: 1 },
+        { id: A2, row: 'A', number: 2 },
+        { id: B1, row: 'B', number: 1 },
+      ],
+    },
+  });
+  const holds = createFakeHoldStore();
+  const ryow = createFakeRyowStore();
+  const service = createBookingService({ repo, holds, ryow, now: () => Date.parse('2026-11-20T20:00:00.000Z') });
+  return { repo, holds, service };
+}
+
+test('a cancelled showtime refuses holds, confirm and verify with showtime_cancelled, never touching Redis', async () => {
+  const { service, holds } = setupCancelled();
+  for (const attempt of [
+    service.acquireHolds(req(ALICE, [A1])),
+    service.confirmBooking(req(ALICE, [A1])),
+    service.verifyHolds(req(ALICE, [A1])),
+  ]) {
+    const error = await refused(attempt);
+    assert.equal(error.code, 'showtime_cancelled');
+    assert.equal(error.status, 410);
+  }
+  assert.deepEqual(holds.calls, [], 'a dead showing is refused before any seat is touched');
+});
+
 // ---- The hold caps (ADR 0018) ---------------------------------------------------------------------
 
 function capped(caps: { perOwner?: number; perAddress?: number }) {

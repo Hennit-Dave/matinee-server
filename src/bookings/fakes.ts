@@ -117,8 +117,8 @@ export function createFakeRyowStore(): FakeRyowStore {
 }
 
 export interface FakeRepoSeed {
-  /** showtimeId -> its screen and per-seat price. */
-  showtimes: Record<string, { screenId: string; priceCents: number }>;
+  /** showtimeId -> its screen and per-seat price. `cancelledAt` set means the showing is cancelled (ADR 0020). */
+  showtimes: Record<string, { screenId: string; priceCents: number; cancelledAt?: Date | null }>;
   /** screenId -> its seats. */
   screens: Record<string, { id: string; row: string; number: number }[]>;
 }
@@ -144,6 +144,7 @@ export function createFakeRepo(seed: FakeRepoSeed): FakeBookingRepo {
       return {
         showtimeId,
         priceCents: showtime.priceCents,
+        cancelledAt: showtime.cancelledAt ?? null,
         seats: screenSeats.filter((seat) => seatIds.includes(seat.id)),
       };
     },
@@ -174,6 +175,11 @@ export function createFakeRepo(seed: FakeRepoSeed): FakeBookingRepo {
         priceCents: rows[0]!.priceCents,
         seats: rows.map((b) => ({ id: b.seatId, row: byId.get(b.seatId)?.row ?? 'A', number: byId.get(b.seatId)?.number ?? 1 })),
       };
+    },
+    async deleteBookingsByReference(reference) {
+      const before = repo.bookings.length;
+      repo.bookings = repo.bookings.filter((b) => b.reference !== reference);
+      return before - repo.bookings.length;
     },
   };
   return repo;

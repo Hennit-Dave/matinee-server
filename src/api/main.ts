@@ -16,6 +16,8 @@ import { createOrderRepo } from '../payments/orderRepo.js';
 import { createOrderStatusService, type OrderStatusService } from '../payments/orderStatus.js';
 import { createStripeGateway } from '../payments/stripe.js';
 import { createWebhookService, type WebhookService } from '../payments/webhookService.js';
+import { createCancelShowtimeService, type CancelShowtimeService } from '../showtimes/cancelService.js';
+import { createShowtimeCancelRepo } from '../showtimes/cancelRepo.js';
 import { createRateLimiter } from '../ratelimit/limiter.js';
 import { policiesForProfile } from '../ratelimit/policies.js';
 import { createRedisRateLimitStore } from '../ratelimit/slidingWindow.js';
@@ -55,6 +57,12 @@ function readStripeConfig(): { secretKey?: string; webhookSecret?: string } {
     secretKey: process.env.STRIPE_SECRET_KEY?.trim() || undefined,
     webhookSecret: process.env.STRIPE_WEBHOOK_SECRET?.trim() || undefined,
   };
+}
+
+// The admin-only cancel endpoint (ADR 0020) is mounted only when this is set. The value is never logged; only its
+// absence matters (the route is then not mounted at all).
+function readAdminApiKey(): string | undefined {
+  return process.env.ADMIN_API_KEY?.trim() || undefined;
 }
 
 const logger = createLogger();
@@ -134,6 +142,8 @@ let webhook: WebhookService | undefined;
 let orderStatus: OrderStatusService | undefined;
 let paymentQueue: PaymentQueue | undefined;
 let bullMq: Redis | undefined;
+let cancel: CancelShowtimeService | undefined;
+const adminKey = readAdminApiKey();
 if (stripeConfig.secretKey && stripeConfig.webhookSecret) {
   const gateway = createStripeGateway({ secretKey: stripeConfig.secretKey, webhookSecret: stripeConfig.webhookSecret });
   const orderRepo = createOrderRepo(db);
@@ -143,6 +153,12 @@ if (stripeConfig.secretKey && stripeConfig.webhookSecret) {
   checkout = createCheckoutService({ repo: orderRepo, gateway, bookings, logger });
   webhook = createWebhookService({ gateway, events: eventRepo, enqueue: (name, data, jobId) => paymentQueue!.add(name, data, jobId), logger });
   orderStatus = createOrderStatusService({ repo: orderRepo, movies, logger });
+  // The admin cancel endpoint (ADR 0020) is mounted only when the admin key is also set; the refund job rides the
+  // same payments queue.
+  if (adminKey) {
+    const showtimeCancelRepo = createShowtimeCancelRepo(db);
+    cancel = createCancelShowtimeService({ repo: showtimeCancelRepo, enqueue: (name, data, jobId) => paymentQueue!.add(name, data, jobId), logger });
+  }
 } else {
   logger.warn('payments_disabled', { note: 'STRIPE_SECRET_KEY and STRIPE_WEBHOOK_SECRET are not both set; checkout, the webhook and the order status are not mounted.' });
 }
@@ -152,7 +168,7 @@ if (stripeConfig.secretKey && stripeConfig.webhookSecret) {
 // keeps the per-install limits (policies.ts, ADR 0016's open item).
 const rateLimiter = createRateLimiter({ store: createRedisRateLimitStore(redis), logger, policies: policiesForProfile(holdCaps.profile) });
 
-const app = createApp({ logger, db, redis, movies, showtimes, seats, bookings, checkout, webhook, orderStatus, rateLimiter, waitingRoom, showtimeExists, maxInFlight: overload.maxInFlight });
+const app = createApp({ logger, db, redis, movies, showtimes, seats, bookings, checkout, webhook, orderStatus, cancel, adminKey, rateLimiter, waitingRoom, showtimeExists, maxInFlight: overload.maxInFlight });
 
 const server = app.listen(port, () => {
   logger.info('api_listening', { port });

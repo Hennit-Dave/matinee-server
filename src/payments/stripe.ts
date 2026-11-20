@@ -44,6 +44,12 @@ export interface PaymentGateway {
   constructEvent(rawBody: Buffer, signatureHeader: string): StripeEvent;
   /** Refunds a PaymentIntent. `idempotencyKey` is deterministic (`refund_<pi>`) so a retried job refunds once. */
   refund(paymentIntentId: string, idempotencyKey: string): Promise<RefundResult>;
+  /**
+   * Cancels an unconfirmed PaymentIntent (ADR 0020): the customer's PaymentSheet can no longer complete. Throws
+   * when it cannot be cancelled (e.g. it already succeeded), which the caller treats as "the money is moving, let
+   * the webhook's processor settle it".
+   */
+  cancelPaymentIntent(paymentIntentId: string): Promise<PaymentIntentResult>;
 }
 
 export interface StripeGatewayOptions {
@@ -89,6 +95,11 @@ export function createStripeGateway(options: StripeGatewayOptions): PaymentGatew
     async refund(paymentIntentId, idempotencyKey) {
       const refund = await stripe.refunds.create({ payment_intent: paymentIntentId }, { idempotencyKey });
       return { id: refund.id, status: refund.status ?? '' };
+    },
+
+    async cancelPaymentIntent(paymentIntentId) {
+      const pi = await stripe.paymentIntents.cancel(paymentIntentId);
+      return toIntent(pi);
     },
   };
 }
