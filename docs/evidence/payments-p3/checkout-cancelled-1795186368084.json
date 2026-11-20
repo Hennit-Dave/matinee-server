@@ -1,0 +1,6 @@
+{
+  "capturedAt": "2026-11-20T14:52:48.082Z",
+  "showtimeId": "102de311-0a24-477a-9bd1-765d30704451",
+  "httpStatus": 410,
+  "body": "{\"error\":{\"code\":\"showtime_cancelled\",\"message\":\"This showing has been cancelled.\",\"requestId\":\"2c012e39-747d-4de8-bc76-0e71917e9709\"}}"
+}

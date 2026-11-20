@@ -1,0 +1,57 @@
+{
+  "capturedAt": "2026-11-20T12:12:13.158Z",
+  "showtime": {
+    "id": "102de311-0a24-477a-9bd1-765d30704451",
+    "startsAt": "2026-11-21T17:45:00.000Z",
+    "cancelledAt": null
+  },
+  "orders": [
+    {
+      "reference": "59041a6e-8c5a-4148-8056-ac3e3e4d628d",
+      "ownerId": "cacf0a3d-9957-4a3a-a9ee-5c7b2b1e6eb1",
+      "status": "succeeded",
+      "totalCents": 1700,
+      "currency": "gbp",
+      "ledger": [
+        {
+          "id": "fee6b473-5f06-4904-bd6b-f3d17fde5df4",
+          "kind": "charge",
+          "amountCents": 1700,
+          "reason": "payment_succeeded",
+          "stripeObjectId": "pi_3UdqNtI0LmihIx3u0CjFuvCr"
+        }
+      ]
+    },
+    {
+      "reference": "bccebe90-547a-4de4-a0a6-4b26fc2bb1dd",
+      "ownerId": "20109992-7cf5-4a27-9937-dcfc51956f7a",
+      "status": "succeeded",
+      "totalCents": 1700,
+      "currency": "gbp",
+      "ledger": [
+        {
+          "id": "74073afc-0a7c-4ef7-b1b1-b251cdbc6c9e",
+          "kind": "charge",
+          "amountCents": 1700,
+          "reason": "payment_succeeded",
+          "stripeObjectId": "pi_3UdqbAI0LmihIx3u1bkaCAxq"
+        }
+      ]
+    }
+  ],
+  "bookingCount": 2,
+  "bookings": [
+    {
+      "reference": "59041a6e-8c5a-4148-8056-ac3e3e4d628d",
+      "ownerId": "cacf0a3d-9957-4a3a-a9ee-5c7b2b1e6eb1",
+      "seatId": "cfcd1801-18f9-4ac9-a1ef-0ed9bf7ae247",
+      "priceCents": 1550
+    },
+    {
+      "reference": "bccebe90-547a-4de4-a0a6-4b26fc2bb1dd",
+      "ownerId": "20109992-7cf5-4a27-9937-dcfc51956f7a",
+      "seatId": "e7214050-6ee9-41dd-a74f-0b9b3e80b2d1",
+      "priceCents": 1550
+    }
+  ]
+}

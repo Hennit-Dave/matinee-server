@@ -1,0 +1,52 @@
+{
+  "capturedAt": "2026-11-20T14:50:02.920Z",
+  "showtimeId": "102de311-0a24-477a-9bd1-765d30704451",
+  "ordersAndLedgerUnchanged": true,
+  "bookingCount": 0,
+  "orders": [
+    {
+      "reference": "59041a6e-8c5a-4148-8056-ac3e3e4d628d",
+      "status": "refunded",
+      "totalCents": 1700,
+      "currency": "gbp",
+      "ledger": [
+        {
+          "id": "fee6b473-5f06-4904-bd6b-f3d17fde5df4",
+          "kind": "charge",
+          "amountCents": 1700,
+          "reason": "payment_succeeded",
+          "stripeObjectId": "pi_3UdqNtI0LmihIx3u0CjFuvCr"
+        },
+        {
+          "id": "c3c8a346-aa4e-463e-bfe4-fee94a1a5ad9",
+          "kind": "refund",
+          "amountCents": 1700,
+          "reason": "showtime_cancelled_refund",
+          "stripeObjectId": "re_3UdqNtI0LmihIx3u0E9qxcOu"
+        }
+      ]
+    },
+    {
+      "reference": "bccebe90-547a-4de4-a0a6-4b26fc2bb1dd",
+      "status": "refunded",
+      "totalCents": 1700,
+      "currency": "gbp",
+      "ledger": [
+        {
+          "id": "74073afc-0a7c-4ef7-b1b1-b251cdbc6c9e",
+          "kind": "charge",
+          "amountCents": 1700,
+          "reason": "payment_succeeded",
+          "stripeObjectId": "pi_3UdqbAI0LmihIx3u1bkaCAxq"
+        },
+        {
+          "id": "df7c4f36-e093-4cd3-9c0c-08c378406c93",
+          "kind": "refund",
+          "amountCents": 1700,
+          "reason": "showtime_cancelled_refund",
+          "stripeObjectId": "re_3UdqbAI0LmihIx3u1hj9ONE2"
+        }
+      ]
+    }
+  ]
+}
