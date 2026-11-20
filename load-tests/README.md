@@ -10,6 +10,7 @@ in [`REPORT.md`](REPORT.md).
 |---|---|---|
 | [`seat-contention.js`](seat-contention.js) | **500 VUs contend for the same 50 seats** (10 per seat), each hold → confirm. Pass = exactly 50 bookings, one per seat, zero duplicates, and ~450 clean `409 seat_taken` (no 5xx, no unexpected 4xx). | `TRAFFIC_PROFILE=loadtest` |
 | [`waiting-room.js`](waiting-room.js) | **500 users against a small cap.** Exactly `WAITING_ROOM_MAX_ACTIVE` are admitted, the rest queue with distinct FIFO positions (`ahead_sum` = 122265 iff 0..494), and admission proceeds at the fixed rate. | `TRAFFIC_PROFILE=loadtest` **and** `WAITING_ROOM_ENABLED=true` `WAITING_ROOM_MAX_ACTIVE=5` |
+| [`ramp.js`](ramp.js) | **Ramps 50 → 500 VUs** against the seat map to find the `MAX_IN_FLIGHT` knee (where p99 latency climbs and `server_busy` first appears). | `TRAFFIC_PROFILE=loadtest` **and** an explicit `MAX_IN_FLIGHT` (so shedding stays ON — the point of the run) |
 
 ## How to run (local throwaway stack)
 
@@ -68,3 +69,22 @@ SELECT showtime_id, seat_id, COUNT(*)
 `docker run --rm -i -v "$PWD":/tests -v "$PWD":/tmp grafana/k6 run /tests/load-tests/seat-contention.js`.
 
 The deploy slice re-runs these same scripts against the deployed Railway server (change only `BASE_URL`).
+
+## The ramp test (deploy slice — sets the real MAX_IN_FLIGHT)
+
+`ramp.js` ramps concurrency and reports latency + `server_busy` + `rate_limited` per run. It runs against a
+server with `TRAFFIC_PROFILE=loadtest` (lifts per-address limits, the room and the hold caps) **and** an explicit
+`MAX_IN_FLIGHT` (explicit beats the profile, so the shedder stays ON). The knee is where p99 latency climbs sharply
+or `server_busy` first appears — set `MAX_IN_FLIGHT` just above it.
+
+```
+TRAFFIC_PROFILE=loadtest MAX_IN_FLIGHT=250 \
+  DATABASE_URL=… DATABASE_READ_URL=… DATABASE_DIRECT_URL=… REDIS_URL=… TMDB_READ_TOKEN=… node dist/api/main.js
+SHOWTIME_ID=<a seeded showtime id>
+k6 run --env BASE_URL=http://localhost:3001 --env SHOWTIME_ID="$SHOWTIME_ID" \
+  --summary-export=docs/evidence/deploy/summary-ramp.json \
+  load-tests/ramp.js
+```
+
+Read the summary next to the API log's `load_shed` lines (they carry `inFlight`/`maxInFlight`) to see exactly
+where the shedder started refusing.

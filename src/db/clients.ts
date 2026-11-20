@@ -7,6 +7,29 @@ import { PrismaClient } from '../generated/prisma/client.js';
 const PRIMARY_VAR = 'DATABASE_URL';
 const READ_VAR = 'DATABASE_READ_URL';
 
+/** Loopback hosts run a local Postgres with no TLS listener, so no `sslmode` should be pinned on them. */
+const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '0.0.0.0']);
+
+/**
+ * Pins `sslmode=verify-full` on a Postgres URL that points at a TLS host (Neon, in production), and leaves
+ * local/CI URLs alone (their Postgres has no TLS listener). Neon requires TLS; `verify-full` both satisfies it and
+ * silences node-postgres's SSL-configuration deprecation warning. The URL is re-serialised by `URL`, which round-
+ * trips a valid `postgresql://` connection string (including a percent-encoded password) unchanged apart from the
+ * one query parameter we set. A URL that cannot be parsed, or one with no host, is returned as given.
+ */
+export function withSslModeVerifyFull(url: string): string {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return url;
+  }
+  const host = parsed.hostname.replace(/^\[|\]$/g, '').toLowerCase();
+  if (!host || LOOPBACK_HOSTS.has(host)) return url;
+  parsed.searchParams.set('sslmode', 'verify-full');
+  return parsed.toString();
+}
+
 /**
  * Pool size, chosen (not measured yet — revisit once real traffic exists, see docs/decisions and
  * the follow-up ARCHITECTURE.md). Neon's free-plan pooled endpoint multiplexes many client
@@ -37,10 +60,10 @@ export function createDbClients(overrides?: { primaryUrl?: string; readUrl?: str
   const readUrl = overrides?.readUrl ?? process.env[READ_VAR];
   if (!readUrl) throw new Error(`${READ_VAR} is not set.`);
 
-  const primary = new PrismaClient({ adapter: new PrismaPg({ connectionString: primaryUrl, max: PRIMARY_POOL_MAX }) });
+  const primary = new PrismaClient({ adapter: new PrismaPg({ connectionString: withSslModeVerifyFull(primaryUrl), max: PRIMARY_POOL_MAX }) });
   const replica = new PrismaClient({
     adapter: new PrismaPg({
-      connectionString: readUrl,
+      connectionString: withSslModeVerifyFull(readUrl),
       max: REPLICA_POOL_MAX,
       connectionTimeoutMillis: REPLICA_CONNECT_TIMEOUT_MS,
     }),
