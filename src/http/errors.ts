@@ -1,4 +1,5 @@
 import type { ErrorRequestHandler, RequestHandler } from 'express';
+import { captureException } from '../observability/sentry.js';
 import type { Logger } from './logger.js';
 
 /**
@@ -162,9 +163,22 @@ function fromBodyParserError(err: unknown): ApiError | null {
   return null;
 }
 
+/**
+ * The Sentry reporting line (observability slice): report ONLY an unexpected exception — anything that is not an
+ * `ApiError` (the known 4xx/503 vocabulary), not a body-parser error (mapped to a 4xx) and not a transient
+ * database error (mapped to `503 server_busy`, overload). Such an error becomes `500 internal_error` in the
+ * handler: a real bug, never the expected refusals. Pure, so it is unit-tested.
+ */
+export function shouldReportToSentry(err: unknown): boolean {
+  if (err instanceof ApiError) return false;
+  if (fromBodyParserError(err)) return false;
+  if (isTransientDatabaseError(err)) return false;
+  return true;
+}
+
 export function createErrorHandler(logger: Logger): ErrorRequestHandler {
   // Express identifies error middleware by its four parameters, so `_next` must stay.
-  return (err, _req, res, next) => {
+  return (err, req, res, next) => {
     if (res.headersSent) {
       next(err);
       return;
@@ -178,9 +192,19 @@ export function createErrorHandler(logger: Logger): ErrorRequestHandler {
 
     if (busy) {
       logger.warn('database_busy', { requestId, reason: err instanceof Error ? err.message : String(err) });
-    } else if (!(err instanceof ApiError) && !fromBodyParserError(err)) {
-      // Unexpected: log for us, tell the caller nothing about it.
+    } else if (shouldReportToSentry(err)) {
+      // Unexpected: log for us, tell the caller nothing about it, and capture it in Sentry.
       logger.error('unhandled_error', { requestId, reason: err instanceof Error ? err.message : String(err) });
+      const userId = typeof res.locals.userId === 'string' ? res.locals.userId : undefined;
+      captureException(err, {
+        tags: {
+          requestId,
+          errorCode: apiError.code,
+          method: String(req.method ?? ''),
+          route: `${String(res.locals.routeBase ?? '')}${String(req.route?.path ?? '')}`,
+        },
+        ...(userId ? { user: { id: userId } } : {}),
+      });
     } else if (apiError.reason) {
       logger.warn('request_rejected', { requestId, errorCode: apiError.code, reason: apiError.reason });
     }
