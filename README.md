@@ -271,7 +271,7 @@ migration moves to a release/pre-deploy phase first (documented in `ARCHITECTURE
 
 Shared (both services): `DATABASE_URL` (pooled primary) · `DATABASE_READ_URL` (pooled replica) ·
 `DATABASE_DIRECT_URL` (unpooled, migrations only) · `REDIS_URL` (private Railway Redis) · `STRIPE_SECRET_KEY` ·
-`TRAFFIC_PROFILE` (`default`).
+`TRAFFIC_PROFILE` (`default`) · `SENTRY_DSN` (optional — error tracking; unset ⇒ Sentry no-ops and the server still boots).
 
 API only: `STRIPE_WEBHOOK_SECRET` · `ADMIN_API_KEY` · `TMDB_READ_TOKEN` · `PORT`.
 

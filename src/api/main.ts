@@ -27,6 +27,7 @@ import { createShowtimeService } from '../showtimes/service.js';
 import { readWaitingRoomConfig } from '../waitingroom/config.js';
 import { createRedisWaitingRoomStore } from '../waitingroom/store.js';
 import { createWaitingRoom } from '../waitingroom/waitingRoom.js';
+import { initSentry } from '../observability/sentry.js';
 import { createApp } from './app.js';
 import type { Redis } from 'ioredis';
 
@@ -66,6 +67,9 @@ function readAdminApiKey(): string | undefined {
 }
 
 const logger = createLogger();
+
+// Error tracking (observability slice). Fail-safe: without SENTRY_DSN this no-ops and the server still boots.
+initSentry();
 
 // A bad or missing env var stops the server before it listens: never start weaker. Every boot
 // and shutdown line goes through the logger — no console.log/console.error anywhere (AGENTS.md).

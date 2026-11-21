@@ -14,6 +14,7 @@ import { createStripeGateway } from '../payments/stripe.js';
 import { createShowtimeCancelRepo } from '../showtimes/cancelRepo.js';
 import { createBullMqConnection, createRedisClient } from './connection.js';
 import { JOB_PAYMENT_SUCCEEDED, JOB_SHOWTIME_CANCELLED, PAYMENT_QUEUE_NAME } from './queue.js';
+import { captureException, initSentry } from '../observability/sentry.js';
 
 /**
  * The payment worker (ADR 0019), a SEPARATE always-on process from the API: the webhook enqueues and returns
@@ -24,6 +25,9 @@ import { JOB_PAYMENT_SUCCEEDED, JOB_SHOWTIME_CANCELLED, PAYMENT_QUEUE_NAME } fro
  */
 
 const logger = createLogger();
+
+// Error tracking (observability slice). Fail-safe: without SENTRY_DSN this no-ops and the worker still boots.
+initSentry();
 
 // A bad or missing env var stops the worker before it starts, like main.ts. Only the secret's ABSENCE is
 // reported, by name — the value is never logged.
@@ -77,7 +81,23 @@ worker.on('completed', (job) => {
   logger.info('job_completed', { jobId: String(job.id), ...(job.name ? { reason: job.name } : {}) });
 });
 worker.on('failed', (job, err) => {
-  logger.error('job_failed', { jobId: String(job?.id ?? ''), attempt: job?.attemptsMade ?? 0, reason: err.message });
+  const jobId = String(job?.id ?? '');
+  const attempt = job?.attemptsMade ?? 0;
+  logger.error('job_failed', { jobId, attempt, reason: err.message });
+
+  // Retries exhausted (attemptsMade reached the configured attempts): capture to Sentry with the payload ids so a
+  // stuck payment/refund surfaces and can be traced. A mid-retry failure just logs (BullMQ will retry it).
+  const attempts = job?.opts?.attempts ?? 1;
+  if (job && job.attemptsMade >= attempts) {
+    const data = job.data as Record<string, string>;
+    captureException(err, {
+      tags: {
+        jobId,
+        job: job.name,
+        ...Object.fromEntries(Object.entries(data).map(([k, v]) => [k, String(v)])),
+      },
+    });
+  }
 });
 
 logger.info('worker_started', { note: PAYMENT_QUEUE_NAME });
