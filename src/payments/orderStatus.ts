@@ -15,26 +15,28 @@ import type { OrderRepo } from './orderRepo.js';
  * because a caller who has already paid must always be able to learn their outcome.
  */
 
+/** Everything the QR ticket screen shows for one order. Shared by GET /orders/:reference and GET /tickets. */
+export const TicketSchema = z.strictObject({
+  movieId: z.number().int().positive(),
+  /** Best-effort: empty when TMDB could not be reached. The app falls back to the route param / movie detail. */
+  movieTitle: z.string(),
+  cinemaName: z.string(),
+  screenName: z.string(),
+  format: z.string(),
+  startsAt: z.iso.datetime(),
+  /** UTC HH:MM, the same as the seat map's `time`. */
+  time: z.string().regex(/^\d{2}:\d{2}$/),
+  seats: z.array(z.strictObject({ row: z.string().regex(/^[A-Z]$/), number: z.number().int().positive() })),
+  /** Server-formatted total (e.g. "£38.50"); the app never computes money. */
+  totalFormatted: z.string(),
+});
+export type Ticket = z.infer<typeof TicketSchema>;
+
 export const OrderStatusResponseSchema = z.strictObject({
   reference: z.uuid(),
   status: z.enum(['requires_payment', 'succeeded', 'refunded', 'failed']),
   /** Present only when `status === 'succeeded'`: everything the QR ticket screen shows. */
-  ticket: z
-    .strictObject({
-      movieId: z.number().int().positive(),
-      /** Best-effort: empty when TMDB could not be reached. The app falls back to the route param / movie detail. */
-      movieTitle: z.string(),
-      cinemaName: z.string(),
-      screenName: z.string(),
-      format: z.string(),
-      startsAt: z.iso.datetime(),
-      /** UTC HH:MM, the same as the seat map's `time`. */
-      time: z.string().regex(/^\d{2}:\d{2}$/),
-      seats: z.array(z.strictObject({ row: z.string().regex(/^[A-Z]$/), number: z.number().int().positive() })),
-      /** Server-formatted total (e.g. "£38.50"); the app never computes money. */
-      totalFormatted: z.string(),
-    })
-    .optional(),
+  ticket: TicketSchema.optional(),
   /** Present only when `status === 'refunded'`: why the money came back, for the app's copy. */
   refundReason: z.string().optional(),
 });

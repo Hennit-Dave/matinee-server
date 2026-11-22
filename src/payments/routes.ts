@@ -10,6 +10,7 @@ import type { LimitFactory } from '../ratelimit/limiter.js';
 import { ShowtimeIdParamsSchema } from '../showtimes/seat.js';
 import type { CheckoutService } from './checkoutService.js';
 import type { OrderStatusService } from './orderStatus.js';
+import type { TicketsService } from './tickets.js';
 import type { WebhookService } from './webhookService.js';
 
 /**
@@ -53,6 +54,24 @@ export function createCheckoutRouter(service: CheckoutService, limit: LimitFacto
         requestId: String(res.locals.requestId ?? ''),
       });
       res.status(result.created ? 201 : 200).json(result);
+    },
+  );
+
+  return router;
+}
+
+export function createTicketsRouter(service: TicketsService, limit: LimitFactory): Router {
+  const router = Router();
+  router.use(recordRouteBase);
+
+  // GET /tickets — the caller's tickets (Tickets tab). Owner-scoped, never cached, read from the
+  // primary (the same privacy + freshness model as /orders/:reference, and the same limiter).
+  router.get(
+    '/tickets',
+    clientIdHeader({ required: true }),
+    limit('orderStatus'),
+    async (req, res) => {
+      res.json(await service.list(String(res.locals.clientId)));
     },
   );
 

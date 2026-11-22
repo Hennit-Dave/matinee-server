@@ -15,6 +15,7 @@ import { createStripeEventRepo } from '../payments/eventRepo.js';
 import { createOrderRepo } from '../payments/orderRepo.js';
 import { createOrderStatusService, type OrderStatusService } from '../payments/orderStatus.js';
 import { createStripeGateway } from '../payments/stripe.js';
+import { createTicketsService, type TicketsService } from '../payments/tickets.js';
 import { createWebhookService, type WebhookService } from '../payments/webhookService.js';
 import { createCancelShowtimeService, type CancelShowtimeService } from '../showtimes/cancelService.js';
 import { createShowtimeCancelRepo } from '../showtimes/cancelRepo.js';
@@ -144,6 +145,7 @@ const stripeConfig = readStripeConfig();
 let checkout: CheckoutService | undefined;
 let webhook: WebhookService | undefined;
 let orderStatus: OrderStatusService | undefined;
+let tickets: TicketsService | undefined;
 let paymentQueue: PaymentQueue | undefined;
 let bullMq: Redis | undefined;
 let cancel: CancelShowtimeService | undefined;
@@ -157,6 +159,7 @@ if (stripeConfig.secretKey && stripeConfig.webhookSecret) {
   checkout = createCheckoutService({ repo: orderRepo, gateway, bookings, logger });
   webhook = createWebhookService({ gateway, events: eventRepo, enqueue: (name, data, jobId) => paymentQueue!.add(name, data, jobId), logger });
   orderStatus = createOrderStatusService({ repo: orderRepo, movies, logger });
+  tickets = createTicketsService({ repo: orderRepo, movies, logger });
   // The admin cancel endpoint (ADR 0020) is mounted only when the admin key is also set; the refund job rides the
   // same payments queue.
   if (adminKey) {
@@ -172,7 +175,7 @@ if (stripeConfig.secretKey && stripeConfig.webhookSecret) {
 // keeps the per-install limits (policies.ts, ADR 0016's open item).
 const rateLimiter = createRateLimiter({ store: createRedisRateLimitStore(redis), logger, policies: policiesForProfile(holdCaps.profile) });
 
-const app = createApp({ logger, db, redis, movies, showtimes, seats, bookings, checkout, webhook, orderStatus, cancel, adminKey, rateLimiter, waitingRoom, showtimeExists, maxInFlight: overload.maxInFlight });
+const app = createApp({ logger, db, redis, movies, showtimes, seats, bookings, checkout, webhook, orderStatus, tickets, cancel, adminKey, rateLimiter, waitingRoom, showtimeExists, maxInFlight: overload.maxInFlight });
 
 const server = app.listen(port, () => {
   logger.info('api_listening', { port });
