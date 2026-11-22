@@ -40,6 +40,19 @@ decides who **owns**. Correctness fails closed (Redis down → `503 holds_unavai
 Payment status, webhook idempotency records (`processed_stripe_events`), and the append-only `ledger_entries`
 live in Postgres only (RULES C4). Redis is the queue + the fast-path hold/limit store, never the money truth.
 
+## Observability
+
+Every request is logged with its `requestId`, `userId`, route, status and timing (the allow-list logger), and every background-job attempt is logged too — so "what happened to this user's payment at 3:14pm?" is answerable from the logs alone. Sentry **adds** error tracking on top of that; it never replaces the logger, and it reuses the same `requestId`/`userId` so a Sentry issue and the logs line up.
+
+**Server** (`src/observability/sentry.ts`). `initSentry()` reads `SENTRY_DSN` and is a fail-safe no-op when it's unset — the API and worker still boot with no DSN (the same gating as Stripe and `ADMIN_API_KEY`), so local and CI run clean. Error capture only (`tracesSampleRate: 0`). Reporting is on the **manual path only**: the error handler calls `shouldReportToSentry()` → `captureException()`. `shouldReportToSentry` returns **false** for our expected vocabulary — `ApiError` (the 4xx domain errors), body-parser errors, and transient DB errors (those become a `503 server_busy`, logged as a warning) — and **true** only for the unexpected `internal_error`. We deliberately do **not** call `Sentry.setupExpressErrorHandler`, which would re-admit the whole 4xx/5xx vocabulary and bury the real signal. The process-level uncaught-exception and unhandled-rejection integrations stay on, so a crash that escapes the request handler is still captured. `beforeSend` runs `scrubSentryEvent`, which deletes `event.request` so a checkout body or a webhook's raw payload can never ride along — only our own tags (`requestId`, `errorCode`, `method`, `route`) and `user.id` travel. `scrubSentryEvent` is pure and unit-tested.
+
+**Mobile** (`src/lib/initSentry.ts`, `@sentry/react-native`). Initialised at the app root as early as possible so startup crashes are caught; captures JS errors, unhandled rejections and native crashes. Fail-safe no-op without `EXPO_PUBLIC_SENTRY_DSN`. (Source-map upload for fully symbolicated stack traces is a later slice.)
+
+**On the DSNs as secrets.** `SENTRY_DSN` lives only in server env (Railway). `EXPO_PUBLIC_SENTRY_DSN` is bundled into the app and readable by anyone who downloads it — which is safe, because a Sentry DSN is a write-only ingestion key: it can send events, it cannot read issues or project data.
+
+Verified live against both DSNs — see `docs/evidence/observability/`.
+
+
 ## Deploy-time constraints
 
 - **Migrate-on-API-start is safe only because there is a single `api` instance.** `prisma migrate deploy` runs
