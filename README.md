@@ -1,6 +1,6 @@
 # Matinee server
 
-**Matinee — backend.** The API, payments and traffic-management layer behind the Matinee cinema-booking app. The API, background jobs and database behind Matinee, a cinema ticket booking app where a seat is never sold twice.
+The API, payments, background jobs and database behind Matinee, a cinema ticket booking app where a seat is never sold twice.
 
 - **The app** (screenshots, demo GIF, Android build): [matinee-mobile](https://github.com/Hennit-Dave/matinee-mobile)
 - **Download the Android build:** https://expo.dev/accounts/hennit_dave/projects/matinee/builds/ef7c7345-80bd-43cf-a9bf-1d5f534817e7
