@@ -1,4 +1,4 @@
-import type { OrderRecord, OrderRepo, OrderStatus, TicketData } from './orderRepo.js';
+import type { OrderRecord, OrderRepo, OrderStatus, TicketData, TicketListItem } from './orderRepo.js';
 import type { PaymentGateway, PaymentIntentResult, StripeEvent } from './stripe.js';
 import type { StripeEventRepo } from './eventRepo.js';
 
@@ -130,6 +130,29 @@ export function createFakeOrderRepo(): FakeOrderRepo {
       if (!ticket) return null;
       // Mirrors the real repo: seats come back sorted by row, then number.
       return { ...ticket, seats: [...ticket.seats].sort((a, b) => (a.row === b.row ? a.number - b.number : a.row < b.row ? -1 : 1)) };
+    },
+    async findTicketsByOwner(ownerId) {
+      const sortSeats = (seats: TicketData['seats']) =>
+        [...seats].sort((a, b) => (a.row === b.row ? a.number - b.number : a.row < b.row ? -1 : 1));
+      const tickets: TicketListItem[] = [];
+      for (const order of [...repo.orders.values()]) {
+        if (order.ownerId !== ownerId) continue;
+        if (order.status !== 'succeeded' && order.status !== 'refunded' && order.status !== 'requires_payment') continue;
+        const ticket = repo.ticketByReference.get(order.reference);
+        if (!ticket) continue;
+        tickets.push({
+          reference: order.reference,
+          status: order.status as TicketListItem['status'],
+          totalCents: order.totalCents,
+          movieId: ticket.movieId,
+          cinemaName: ticket.cinemaName,
+          screenName: ticket.screenName,
+          format: ticket.format,
+          startsAt: ticket.startsAt,
+          seats: sortSeats(ticket.seats),
+        });
+      }
+      return tickets;
     },
     async refundReason(orderId) {
       const refunds = repo.ledger.filter((l) => l.orderId === orderId && l.kind === 'refund');

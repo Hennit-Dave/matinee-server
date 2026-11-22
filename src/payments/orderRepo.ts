@@ -72,6 +72,8 @@ export interface OrderRepo {
   ledgerFor(orderId: string): Promise<LedgerRecord[]>;
   /** The venue, showtime and seats a succeeded order booked, for the ticket. `null` when no booking exists yet. */
   findTicketByReference(reference: string): Promise<TicketData | null>;
+  /** Every order with ticket context for one owner (succeeded / refunded / requires_payment), one batched read. */
+  findTicketsByOwner(ownerId: string): Promise<TicketListItem[]>;
   /** The latest refund's reason for an order, or `null` when nothing was refunded. */
   refundReason(orderId: string): Promise<string | null>;
 }
@@ -84,6 +86,14 @@ export interface TicketData {
   format: string;
   startsAt: Date;
   seats: { row: string; number: number }[];
+}
+
+/** A ticket-list item: the ticket fields plus the order reference, status and total. */
+export interface TicketListItem extends TicketData {
+  reference: string;
+  /** The statuses that carry ticket context. `failed` is never present. */
+  status: 'requires_payment' | 'succeeded' | 'refunded';
+  totalCents: number;
 }
 
 const ORDER_SELECT = {
@@ -243,6 +253,60 @@ export function createOrderRepo(db: DbClients): OrderRepo {
           .map((b) => ({ row: b.seat.row, number: b.seat.number }))
           .sort((a, b) => (a.row === b.row ? a.number - b.number : a.row < b.row ? -1 : 1)),
       };
+    },
+
+    async findTicketsByOwner(ownerId) {
+      const orders = await db.primary.order.findMany({
+        where: { ownerId, status: { in: ['succeeded', 'refunded', 'requires_payment'] } },
+        select: { reference: true, status: true, totalCents: true, showtimeId: true, seatIds: true },
+      });
+      if (orders.length === 0) return [];
+
+      // Batched reads (never one per order): the showtimes, then the seats for the orders' seatIds snapshot.
+      const showtimeIds = [...new Set(orders.map((o) => o.showtimeId))];
+      const showtimes = await db.primary.showtime.findMany({
+        where: { id: { in: showtimeIds } },
+        select: {
+          id: true,
+          movieId: true,
+          startsAt: true,
+          screen: { select: { name: true, format: true, cinema: { select: { name: true } } } },
+        },
+      });
+      const showtimeById = new Map(showtimes.map((s) => [s.id, s]));
+
+      const seatIds = [...new Set(orders.flatMap((o) => o.seatIds as string[]))];
+      const seats = await db.primary.seat.findMany({
+        where: { id: { in: seatIds } },
+        select: { id: true, row: true, number: true },
+      });
+      const seatById = new Map(seats.map((s) => [s.id, s]));
+
+      const sortSeats = (list: { row: string; number: number }[]) =>
+        list.sort((a, b) => (a.row === b.row ? a.number - b.number : a.row < b.row ? -1 : 1));
+
+      return orders.flatMap((o) => {
+        const showtime = showtimeById.get(o.showtimeId);
+        if (!showtime) return [];
+        return [
+          {
+            reference: o.reference,
+            status: o.status as TicketListItem['status'],
+            totalCents: o.totalCents,
+            movieId: showtime.movieId,
+            cinemaName: showtime.screen.cinema.name,
+            screenName: showtime.screen.name,
+            format: showtime.screen.format,
+            startsAt: showtime.startsAt,
+            seats: sortSeats(
+              (o.seatIds as string[]).flatMap((id) => {
+                const seat = seatById.get(id);
+                return seat ? [{ row: seat.row, number: seat.number }] : [];
+              }),
+            ),
+          },
+        ];
+      });
     },
 
     async refundReason(orderId) {

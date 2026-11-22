@@ -18,8 +18,9 @@ import type { ShowtimeService } from '../showtimes/showtime.js';
 import { createQueueRouter } from '../waitingroom/routes.js';
 import type { WaitingRoom } from '../waitingroom/waitingRoom.js';
 import type { CheckoutService } from '../payments/checkoutService.js';
-import { createCheckoutRouter, createOrderStatusRouter, createStripeWebhookRouter } from '../payments/routes.js';
+import { createCheckoutRouter, createOrderStatusRouter, createStripeWebhookRouter, createTicketsRouter } from '../payments/routes.js';
 import type { OrderStatusService } from '../payments/orderStatus.js';
+import type { TicketsService } from '../payments/tickets.js';
 import type { WebhookService } from '../payments/webhookService.js';
 import type { CancelShowtimeService } from '../showtimes/cancelService.js';
 import { createAdminCancelRouter } from '../showtimes/cancelRoutes.js';
@@ -44,6 +45,8 @@ export interface AppDeps {
   webhook?: WebhookService;
   /** The confirmation poll (payments P2), mounted under /orders. When absent the route is not mounted. */
   orderStatus?: OrderStatusService;
+  /** The caller's tickets list (payments P3 follow-up), mounted at /tickets. When absent the route is not mounted. */
+  tickets?: TicketsService;
   /**
    * The admin cancel endpoint (ADR 0020), mounted under /admin only when both this service and `adminKey` are
    * present. When absent the route is not mounted.
@@ -106,6 +109,9 @@ export function createApp(deps: AppDeps) {
   }
   if (deps.orderStatus) {
     app.use(createOrderStatusRouter(deps.orderStatus, limit));
+  }
+  if (deps.tickets) {
+    app.use(createTicketsRouter(deps.tickets, limit));
   }
   if (deps.cancel && deps.adminKey) {
     app.use('/admin', createAdminCancelRouter(deps.cancel, deps.adminKey));
