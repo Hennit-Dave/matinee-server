@@ -3,7 +3,7 @@ import type { PrismaClient } from '../generated/prisma/client.js';
 import { closeDbClients, createDbClients } from './clients.js';
 import { createLogger } from '../http/logger.js';
 import { createTmdbMovieSource } from '../movies/tmdb.js';
-import { SEED_SCREENS, buildSeedPlan, buildSeedSeats, type SeedScreen } from '../showtimes/seedPlan.js';
+import { SEED_SCREENS, buildSeedPlan, buildSeedSeats, resolveSeedInserts, showtimeKey, uniqueMovieIds, type SeedScreen } from '../showtimes/seedPlan.js';
 
 /**
  * Idempotent seed for every seat of the given screens (the screens must already exist). Keyed on
@@ -51,6 +51,10 @@ export async function seedSeats(
  * Uses natural keys (`id` for cinemas/screens, `(screenId, startsAt)` for showtimes,
  * `(screenId, row, number)` for seats) so re-running updates existing rows and never creates
  * duplicates.
+ *
+ * Showtimes are INSERT-ONLY: an existing screening is never overwritten (its `movieId`, `priceCents`
+ * and `cancelledAt` are preserved, so bookings and holds stay tied to the original screening), while
+ * newly added movies are still given a fresh future slot.
  */
 export async function seedDatabase(
   primary: PrismaClient,
@@ -81,16 +85,22 @@ export async function seedDatabase(
     });
   }
 
-  for (const st of plan.showtimes) {
-    await primary.showtime.upsert({
-      where: { screenId_startsAt: { screenId: st.screenId, startsAt: st.startsAt } },
-      update: { movieId: st.movieId, priceCents: st.priceCents },
-      create: {
-        movieId: st.movieId,
-        screenId: st.screenId,
-        startsAt: st.startsAt,
-        priceCents: st.priceCents,
-      },
+  // Existing screenings inside the plan's window: their natural keys (so they are never overwritten) and the
+  // movies they already cover (so a re-seed only adds the missing screenings for newly added movies).
+  const first = plan.showtimes[0]!.startsAt;
+  const last = plan.showtimes[plan.showtimes.length - 1]!.startsAt;
+  const existing = await primary.showtime.findMany({
+    where: { startsAt: { gte: first, lte: last } },
+    select: { screenId: true, startsAt: true, movieId: true },
+  });
+  const occupiedKeys = new Set(existing.map((st) => showtimeKey(st.screenId, st.startsAt)));
+  const coveredMovieIds = new Set(existing.map((st) => st.movieId));
+
+  const inserts = resolveSeedInserts(movieIds, plan.showtimes, occupiedKeys, coveredMovieIds);
+  if (inserts.length > 0) {
+    await primary.showtime.createMany({
+      data: inserts.map((st) => ({ movieId: st.movieId, screenId: st.screenId, startsAt: st.startsAt, priceCents: st.priceCents })),
+      skipDuplicates: true,
     });
   }
 
@@ -99,7 +109,7 @@ export async function seedDatabase(
   return {
     cinemas: plan.cinemas.length,
     screens: plan.screens.length,
-    showtimes: plan.showtimes.length,
+    showtimes: inserts.length,
     seats,
   };
 }
@@ -123,11 +133,11 @@ async function main() {
       return;
     }
     const tmdb = createTmdbMovieSource({ readToken: readToken!, logger });
-    const nowPlaying = await tmdb.nowPlaying(1);
-    const movieIds = nowPlaying.movies.map((m) => m.id);
+    const [nowPlaying, popular] = await Promise.all([tmdb.nowPlaying(1), tmdb.popular(1)]);
+    const movieIds = uniqueMovieIds(nowPlaying.movies.map((m) => m.id), popular.movies.map((m) => m.id));
     const counts = await seedDatabase(db.primary, movieIds);
     logger.info('seed_completed', {
-      outcome: `${counts.cinemas} cinemas, ${counts.screens} screens, ${counts.showtimes} showtimes, ${counts.seats} seats for ${movieIds.length} movies`,
+      outcome: `${counts.cinemas} cinemas, ${counts.screens} screens, ${counts.showtimes} showtimes, ${counts.seats} seats for ${movieIds.length} movies (now-playing + popular)`,
     });
   } catch (err) {
     logger.error('seed_failed', { reason: err instanceof Error ? err.message : String(err) });
